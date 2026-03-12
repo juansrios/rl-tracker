@@ -19,6 +19,26 @@
     ::-webkit-scrollbar{width:6px;}
     ::-webkit-scrollbar-track{background:transparent;}
     ::-webkit-scrollbar-thumb{background:#2e3050;border-radius:3px;}
+    .sidebar{transition:width .2s ease,transform .2s ease;}
+    .main-content{transition:margin-left .2s ease;}
+    .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:90;}
+    @media(max-width:768px){
+      .overlay.active{display:block;}
+      .desktop-only{display:none!important;}
+    }
+    @media(min-width:769px){
+      .mobile-only{display:none!important;}
+    }
+    @media(max-width:480px){
+      .stat-grid-4{grid-template-columns:1fr 1fr!important;}
+      .stat-grid-3{grid-template-columns:1fr 1fr!important;}
+      .mode-grid-std{grid-template-columns:1fr!important;}
+      .mode-grid-spe{grid-template-columns:1fr 1fr!important;}
+      .error-grid{grid-template-columns:1fr!important;}
+      .result-grid{grid-template-columns:1fr 1fr!important;}
+      .page-pad{padding:16px!important;}
+      .score-grid{grid-template-columns:1fr 20px 1fr 1fr 1fr 1fr!important;}
+    }
   </style>
 </head>
 <body>
@@ -546,28 +566,61 @@ function ImportExportModal({ onClose, onImport }) {
 }
 
 function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg}){
+  const [open,setOpen]=useState(true);
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  React.useEffect(()=>{
+    const fn=()=>{const isMob=window.innerWidth<=768;setMobile(isMob);if(isMob)setOpen(false);else setOpen(true);};
+    window.addEventListener('resize',fn);fn();return()=>window.removeEventListener('resize',fn);
+  },[]);
+  const sidebarWidth=open?240:64;
   return(
     <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text}}>
-      <Sidebar activePage={activePage} onNavigate={onNavigate} sessions={sessions} mmrHistory={mmrHistory} tournaments={tournaments} config={config} syncStatus={syncStatus} syncLabel={syncLabel} syncColor={syncColor} lastSync={lastSync} onOpenCloud={onOpenCloud} onOpenImport={onOpenImport} onPullNow={onPullNow} cloudCfg={cloudCfg}/>
-      <div style={{flex:1,overflow:"auto"}}>{children}</div>
+      {mobile&&<div className={`overlay${open?' active':''}`} onClick={()=>setOpen(false)}/>}
+      <Sidebar activePage={activePage} onNavigate={onNavigate} sessions={sessions} mmrHistory={mmrHistory} tournaments={tournaments} config={config}
+        syncStatus={syncStatus} syncLabel={syncLabel} syncColor={syncColor} lastSync={lastSync} onOpenCloud={onOpenCloud} onOpenImport={onOpenImport} onPullNow={onPullNow} cloudCfg={cloudCfg}
+        open={open} mobile={mobile} onClose={()=>setOpen(false)}/>
+      <div style={{flex:1,overflow:"auto",marginLeft:mobile?0:0,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:C.surface,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:50}}>
+          <button onClick={()=>setOpen(o=>!o)}
+            style={{width:36,height:36,borderRadius:8,border:`1px solid ${C.border}`,background:"none",color:C.sub,fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            {open&&mobile?'✕':'☰'}
+          </button>
+          <div style={{fontSize:14,fontWeight:600,color:C.text}}>🚗 RL Tracker</div>
+          <div style={{flex:1}}/>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:syncColor,flexShrink:0}}/>
+            <span style={{fontSize:11,color:syncColor,fontWeight:600}}>{syncLabel}</span>
+          </div>
+        </div>
+        <div>{children}</div>
+      </div>
     </div>
   );
 }
 
-function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg}){
+function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose}){
+  const w=mobile?(open?280:0):(open?240:64);
+  const nav=(p)=>{onNavigate(p);if(mobile)onClose();};
+  if(mobile&&!open)return null;
   return(
-    <div style={{width:240,background:C.surface,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh",overflow:"auto",flexShrink:0}}>
-      <div style={{padding:"20px 16px",borderBottom:`1px solid ${C.border}`}}>
-        <div style={{fontSize:16,fontWeight:700,color:C.text}}>🚗 RL Tracker</div>
-        <div style={{fontSize:11,color:C.muted,marginTop:2}}>Performance Intelligence</div>
-      </div>
+    <div style={{width:w,minWidth:w,background:C.surface,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",
+      position:mobile?"fixed":"sticky",top:0,height:"100vh",overflow:"auto",flexShrink:0,zIndex:100,
+      transform:mobile&&!open?"translateX(-100%)":"translateX(0)",transition:"transform .2s ease, width .2s ease"}}>
+      {!mobile&&<div style={{padding:open?"20px 16px":"12px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
+        {open&&<div><div style={{fontSize:16,fontWeight:700,color:C.text}}>🚗 RL Tracker</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>Performance Intelligence</div></div>}
+        {!open&&<div style={{fontSize:20,margin:"0 auto"}}>🚗</div>}
+      </div>}
+      {mobile&&<div style={{padding:"16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontSize:15,fontWeight:700,color:C.text}}>🚗 RL Tracker</div>
+        <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:20,cursor:"pointer"}}>✕</button>
+      </div>}
       <div style={{padding:"12px 8px",borderBottom:`1px solid ${C.border}`}}>
         {[{id:"home",label:"Inicio",icon:"🏠"},{id:"stats",label:"Estadísticas",icon:"📊"},{id:"tournaments",label:"Torneos",icon:"🏆"},{id:"settings",label:"Configuración",icon:"⚙️"}].map(item=>(
-          <button key={item.id} onClick={()=>onNavigate(item.id)}
-            style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",borderRadius:6,border:"none",background:activePage===item.id?C.hover:"none",color:activePage===item.id?C.text:C.sub,fontSize:14,fontWeight:activePage===item.id?600:400,textAlign:"left",marginBottom:2}}>
-            <span>{item.icon}</span>
-            <span style={{flex:1}}>{item.label}</span>
-            {item.id==="tournaments"&&tournaments.length>0&&<span style={{background:`${C.orange}25`,color:C.orange,borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>{tournaments.length}</span>}
+          <button key={item.id} onClick={()=>nav(item.id)} title={!open?item.label:undefined}
+            style={{display:"flex",alignItems:"center",gap:open?10:0,justifyContent:open?"flex-start":"center",width:"100%",padding:open?"8px 10px":"8px",borderRadius:6,border:"none",background:activePage===item.id?C.hover:"none",color:activePage===item.id?C.text:C.sub,fontSize:14,fontWeight:activePage===item.id?600:400,textAlign:"left",marginBottom:2}}>
+            <span style={{fontSize:open?14:18}}>{item.icon}</span>
+            {open&&<span style={{flex:1}}>{item.label}</span>}
+            {open&&item.id==="tournaments"&&tournaments.length>0&&<span style={{background:`${C.orange}25`,color:C.orange,borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>{tournaments.length}</span>}
           </button>
         ))}
       </div>
@@ -578,16 +631,16 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
             {MODES.filter(m=>m.group===group).map(m=>{
               const mmr=getLatestMMR(mmrHistory,m.id,m.initMMR),trend=getMMRTrend(mmrHistory,m.id),isActive=activePage===`session_${m.id}`;
               return(
-                <button key={m.id} onClick={()=>onNavigate(`session_${m.id}`)}
+                <button key={m.id} onClick={()=>nav(`session_${m.id}`)} title={!open?m.name:undefined}
                   style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",borderRadius:6,border:"none",background:isActive?`${m.color}22`:"none",color:isActive?C.text:C.sub,fontSize:13,textAlign:"left",marginBottom:2}}
                   onMouseEnter={e=>{if(!isActive)e.currentTarget.style.background=C.hover;}}
                   onMouseLeave={e=>{if(!isActive)e.currentTarget.style.background="none";}}>
-                  <span style={{fontSize:14}}>{m.icon}</span>
-                  <div style={{flex:1}}>{m.name}</div>
-                  <div style={{textAlign:"right"}}>
+                  <span style={{fontSize:open?14:18}}>{m.icon}</span>
+                  {open&&<div style={{flex:1}}>{m.name}</div>}
+                  {open&&<div style={{textAlign:"right"}}>
                     <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:isActive?m.color:C.sub}}>{mmr}</div>
                     {trend!==0&&<div style={{fontSize:10,color:trend>0?C.green:C.red}}>{trend>0?"+":""}{trend}</div>}
-                  </div>
+                  </div>}
                 </button>
               );
             })}
@@ -595,26 +648,31 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
         ))}
       </div>
       {/* Cloud sync panel */}
-      <div style={{borderTop:`1px solid ${C.border}`,padding:'12px 8px'}}>
-        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
-          <div style={{width:6,height:6,borderRadius:'50%',background:syncColor,flexShrink:0}}/>
-          <span style={{fontSize:11,color:syncColor,fontWeight:600,flex:1}}>{syncLabel}</span>
-          {lastSync&&<span style={{fontSize:10,color:C.muted}}>{lastSync.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</span>}
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
-          <button onClick={onOpenCloud}
-            style={{padding:'6px 4px',borderRadius:6,border:`1px solid ${cloudCfg?C.border:C.blue}`,background:cloudCfg?'none':`${C.blue}20`,color:cloudCfg?C.muted:C.blue,fontSize:11,cursor:'pointer',fontWeight:500}}>
-            {cloudCfg?'⚙ Config':'☁ Activar'}
+      <div style={{borderTop:`1px solid ${C.border}`,padding:open?'12px 8px':'8px 4px'}}>
+        {open?<>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:syncColor,flexShrink:0}}/>
+            <span style={{fontSize:11,color:syncColor,fontWeight:600,flex:1}}>{syncLabel}</span>
+            {lastSync&&<span style={{fontSize:10,color:C.muted}}>{lastSync.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</span>}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+            <button onClick={onOpenCloud}
+              style={{padding:'6px 4px',borderRadius:6,border:`1px solid ${cloudCfg?C.border:C.blue}`,background:cloudCfg?'none':`${C.blue}20`,color:cloudCfg?C.muted:C.blue,fontSize:11,cursor:'pointer',fontWeight:500}}>
+              {cloudCfg?'⚙ Config':'☁ Activar'}
+            </button>
+            <button onClick={cloudCfg?onPullNow:onOpenImport}
+              style={{padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
+              {cloudCfg?'⬇ Pull':'📦 Import'}
+            </button>
+          </div>
+          <button onClick={onOpenImport}
+            style={{width:'100%',marginTop:6,padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
+            📦 Importar / Exportar JSON
           </button>
-          <button onClick={cloudCfg?onPullNow:onOpenImport}
-            style={{padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
-            {cloudCfg?'⬇ Pull':'📦 Import'}
-          </button>
-        </div>
-        <button onClick={onOpenImport}
-          style={{width:'100%',marginTop:6,padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
-          📦 Importar / Exportar JSON
-        </button>
+        </>:<div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'center'}}>
+          <button onClick={onOpenCloud} title="Config nube" style={{width:36,height:36,borderRadius:8,border:`1px solid ${cloudCfg?C.border:C.blue}`,background:cloudCfg?'none':`${C.blue}20`,color:cloudCfg?C.muted:C.blue,fontSize:14,cursor:'pointer'}}>☁</button>
+          <button onClick={onOpenImport} title="Importar/Exportar" style={{width:36,height:36,borderRadius:8,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:14,cursor:'pointer'}}>📦</button>
+        </div>}
       </div>
     </div>
   );
@@ -623,12 +681,12 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
 function HomePage({sessions,mmrHistory,tournaments,config,onNavigate,onEditMMR}){
   const totalMatches=sessions.reduce((a,s)=>a+s.matches.length,0);
   return(
-    <div style={{padding:"32px"}}>
+    <div className="page-pad" style={{padding:"32px"}}>
       <div style={{marginBottom:28}}>
         <h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>Panel General</h1>
         <p style={{fontSize:14,color:C.muted}}>Clic en modo → nueva sesión · ✏️ → ajustar MMR</p>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
+      <div className="stat-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
         {[{label:"Sesiones",value:sessions.length,color:C.blue},{label:"Partidas",value:totalMatches,color:C.green},{label:"Torneos",value:tournaments.length,color:C.orange},{label:"Modos activos",value:MODES.filter(m=>sessions.some(s=>s.modeId===m.id)).length,color:C.amber}]
           .map(item=><Card key={item.label}><StatBlock label={item.label} value={item.value} valueColor={item.color}/></Card>)}
       </div>
@@ -736,7 +794,7 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
             :<GhostBtn onClick={startEdit} color={C.blue}>✏️ Editar sesión</GhostBtn>}
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${!duel?8:5},1fr)`,gap:8,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:`repeat(auto-fill,minmax(${!duel?'80px':'100px'},1fr))`,gap:8,marginBottom:20}}>
         {[["Partidas",src.matches.length,C.text],["Victorias",wins,C.green],["Derrotas",losses,C.red],["Empates",draws,"#7289da"],["GF–GC",`${gf}–${ga}`,C.sub],...(!duel?[["⚽ Goles",mg??0,C.green],["🎯 Asist.",ma??0,C.blue],["🧤 Salvadas",ms??0,C.teal]]:[])].map(([l,v,col])=>(
           <Card key={l} style={{padding:"12px 14px"}}><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:.7,marginBottom:4}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{v}</div></Card>
         ))}
@@ -830,7 +888,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
         <div style={{width:44,height:44,borderRadius:12,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{mode.icon}</div>
         <div><h1 style={{fontSize:24,fontWeight:700,color:C.text}}>{mode.name}</h1><p style={{fontSize:13,color:C.muted}}>Nueva sesión</p></div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:20}}>
         <div>
           <Card style={{marginBottom:16}}>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:12}}>MMR actual</div>
@@ -854,7 +912,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
     </div>
   );
   if(step==="tracking")return(
-    <div style={{padding:"32px"}}>
+    <div className="page-pad" style={{padding:"32px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <div style={{width:44,height:44,borderRadius:12,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{mode.icon}</div>
@@ -864,7 +922,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 290px",gap:20}}>
         <div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+          <div className="error-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
             {errors.map(e=>{const cnt=currE[e.id]||0,isFocus=focusErr===e.id;return(
               <Card key={e.id} style={{borderColor:cnt>0?`${mode.color}60`:isFocus?`${mode.color}30`:C.border,padding:"16px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:13,color:isFocus?mode.color:C.sub,fontWeight:isFocus?600:400}}>{e.label}</span>{isFocus&&<Tag color={mode.color}>Foco</Tag>}</div>
@@ -878,7 +936,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
           </div>
           <Card>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:12}}>Resultado de la partida</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:16}}>
+            <div className="result-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:16}}>
               {[["win","Victoria",C.green],["mvp","MVP 👑",C.amber],["loss","Derrota",C.red],["draw","Empate","#7289da"]].map(([v,l,col])=>(
                 <button key={v} onClick={()=>setCurrR(currR===v?null:v)} style={{padding:"11px 6px",borderRadius:8,border:`1.5px solid ${currR===v?col:C.border}`,background:currR===v?`${col}15`:"none",color:currR===v?col:C.sub,fontSize:13,fontWeight:currR===v?700:400}}>{l}</button>
               ))}
@@ -932,9 +990,9 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
         <div style={{width:44,height:44,borderRadius:12,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{mode.icon}</div>
         <div><h1 style={{fontSize:24,fontWeight:700,color:C.text}}>{mode.name}</h1><p style={{fontSize:13,color:C.muted}}>{matches.length} partidas · {wins}W / {matches.length-wins}L</p></div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 340px",gap:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:20}}>
         <div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+          <div className="stat-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
             {[["Partidas",matches.length,C.text],["Victorias",wins,C.green],["Derrotas",matches.length-wins,C.red],["Win%",matches.length>0?Math.round(wins/matches.length*100)+"%":"—",C.blue]].map(([l,v,col])=>(
               <Card key={l} style={{padding:"14px 16px"}}><StatBlock label={l} value={v} valueColor={col}/></Card>
             ))}
@@ -1009,9 +1067,9 @@ function StatsPage({sessions,mmrHistory,config,onViewSession}){
     <div style={{padding:"32px"}}>
       <div style={{marginBottom:20}}><h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>Estadísticas</h1><p style={{fontSize:14,color:C.muted}}>Clic en sesión para ver detalle y editar</p></div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:24}}>
-        {MODES.map(m=><button key={m.id} onClick={()=>setSel(m.id)} style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${sel===m.id?m.color:C.border}`,background:sel===m.id?`${m.color}20`:"none",color:sel===m.id?C.text:C.muted,fontSize:13,fontWeight:sel===m.id?600:400}}>{m.icon} {m.name}</button>)}
+        {MODES.map(m=><button key={m.id} onClick={()=>setSel(m.id)} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${sel===m.id?m.color:C.border}`,background:sel===m.id?`${m.color}20`:"none",color:sel===m.id?C.text:C.muted,fontSize:13,fontWeight:sel===m.id?600:400,flexShrink:0}}>{m.icon} {m.name}</button>)}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:20}}>
         <div>
           <Card style={{marginBottom:14}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
@@ -1143,12 +1201,12 @@ function TournamentPage({sessions,tournaments,config,onSaveTournament}){
             <p style={{fontSize:13,color:C.muted}}>{viewT.date} · {viewT.time}</p>
           </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:`repeat(${!tduel?8:5},1fr)`,gap:8,marginBottom:20}}>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(auto-fill,minmax(${!tduel?'80px':'100px'},1fr))`,gap:8,marginBottom:20}}>
           {[["Partidas",viewT.matches.length,C.text],["Victorias",tw,C.green],["Derrotas",tl,C.red],["Empates",td,"#7289da"],["GF–GC",`${tgf}–${tga}`,C.sub],...(!tduel?[["⚽ Goles",tmg??0,C.green],["🎯 Asist.",tma??0,C.blue],["🧤 Salvadas",tms??0,C.teal]]:[])].map(([l,v,col])=>(
             <Card key={l} style={{padding:"12px 14px"}}><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:.7,marginBottom:4}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{v}</div></Card>
           ))}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:20}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:20}}>
           <div>
             {byRound.map(({round,matches:rm})=>(
               <Card key={round} style={{marginBottom:14}}>
@@ -1301,7 +1359,7 @@ function TournamentPage({sessions,tournaments,config,onSaveTournament}){
         <div><h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>Torneos</h1><p style={{fontSize:14,color:C.muted}}>Historial por modo y rango</p></div>
         <PrimaryBtn onClick={()=>setView("new")} color={C.orange} style={{width:"auto",padding:"12px 24px"}}>🏆 Registrar torneo</PrimaryBtn>
       </div>
-      {tournaments.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
+      {tournaments.length>0&&<div className="stat-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
         {[["Torneos",tournaments.length,C.orange],["Partidas",allPlayed,C.text],["Victorias",allWins,C.green],["Win rate",allPlayed>0?Math.round(allWins/allPlayed*100)+"%":"—",C.blue]].map(([l,v,col])=>(
           <Card key={l}><StatBlock label={l} value={v} valueColor={col}/></Card>
         ))}
