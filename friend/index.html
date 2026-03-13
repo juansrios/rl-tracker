@@ -1,0 +1,1705 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🚗 RL Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#111214;font-family:'DM Sans',sans-serif;color:#fff;}
+    button{cursor:pointer;font-family:'DM Sans',sans-serif;transition:background .12s,opacity .12s;}
+    button:active{opacity:.8;}
+    input,select{font-family:'DM Sans',sans-serif;outline:none;}
+    input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
+    ::-webkit-scrollbar{width:6px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:#2e3050;border-radius:3px;}
+    .sidebar{transition:width .2s ease,transform .2s ease;}
+    .main-content{transition:margin-left .2s ease;}
+    .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:90;}
+    @media(max-width:768px){
+      .overlay.active{display:block;}
+      .desktop-only{display:none!important;}
+    }
+    @media(min-width:769px){
+      .mobile-only{display:none!important;}
+    }
+    @media(max-width:480px){
+      .stat-grid-4{grid-template-columns:1fr 1fr!important;}
+      .stat-grid-3{grid-template-columns:1fr 1fr!important;}
+      .mode-grid-std{grid-template-columns:1fr!important;}
+      .mode-grid-spe{grid-template-columns:1fr 1fr!important;}
+      .error-grid{grid-template-columns:1fr!important;}
+      .result-grid{grid-template-columns:1fr 1fr!important;}
+      .page-pad{padding:16px!important;}
+      .score-grid{grid-template-columns:1fr 20px 1fr 1fr 1fr 1fr!important;}
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState } = React;
+
+const RANK_DEFS = [
+  {name:"Supersonic Legend",  color:"#FF4DC4"},
+  {name:"Grand Champion III", color:"#FF6B6B"},
+  {name:"Grand Champion II",  color:"#FF6B6B"},
+  {name:"Grand Champion I",   color:"#FF6B6B"},
+  {name:"Champion III",       color:"#9B59B6"},
+  {name:"Champion II",        color:"#9B59B6"},
+  {name:"Champion I",         color:"#9B59B6"},
+  {name:"Diamond III",        color:"#5DADE2"},
+  {name:"Diamond II",         color:"#5DADE2"},
+  {name:"Diamond I",          color:"#5DADE2"},
+  {name:"Platinum III",       color:"#76D7C4"},
+  {name:"Platinum II",        color:"#76D7C4"},
+  {name:"Platinum I",         color:"#76D7C4"},
+  {name:"Gold III",           color:"#F4D03F"},
+  {name:"Gold II",            color:"#F4D03F"},
+  {name:"Gold I",             color:"#F4D03F"},
+  {name:"Silver III",         color:"#BDC3C7"},
+  {name:"Silver II",          color:"#BDC3C7"},
+  {name:"Silver I",           color:"#BDC3C7"},
+  {name:"Bronze III",         color:"#CD7F32"},
+  {name:"Bronze II",          color:"#CD7F32"},
+  {name:"Bronze I",           color:"#CD7F32"},
+];
+
+const DEFAULT_MODE_RANKS = {
+  "3v3":        [1780,1660,1576,1436,1315,1196,1076,995,915,835,775,715,655,595,535,475,415,356,295,236,173,0],
+  "2v2":        [1842,1719,1576,1435,1315,1196,1075,995,915,835,775,715,655,595,535,475,415,355,295,236,116,0],
+  "1v1":        [1530,1410,1290,1175,1115,1056,995,935,875,815,755,695,635,575,515,455,395,335,275,216,88,0],
+  "heatseeker": [1700,1580,1460,1135,1076,1015,956,901,855,795,735,675,621,575,515,455,406,355,296,235,175,0],
+  "rumble":     [1700,1580,1277,1196,1116,1056,996,935,875,815,755,695,636,575,516,456,396,336,210,155,100,0],
+  "hoops":      [1700,1580,1148,1095,1036,976,936,875,821,775,723,675,625,575,527,476,439,376,336,155,100,0],
+  "snowday":    [1700,1580,1160,1096,1035,975,937,876,836,777,737,675,636,576,537,477,437,375,338,276,218,0],
+  "dropshot":   [1700,1580,1116,1056,995,945,895,843,795,741,695,643,595,549,496,456,396,356,296,236,215,0],
+};
+
+function getRankTable(config, modeId) {
+  const mins = config[modeId] || DEFAULT_MODE_RANKS[modeId] || DEFAULT_MODE_RANKS["3v3"];
+  return RANK_DEFS.map((r, i) => ({ ...r, min: mins[i] ?? 0 }));
+}
+function getRank(mmr, modeId, config) {
+  const table = getRankTable(config, modeId);
+  return table.find(r => mmr >= r.min) || table[table.length - 1];
+}
+
+const MODES = [
+  {id:"3v3",        name:"3v3 Estándar",  icon:"⚽", color:"#5865F2", group:"standard", initMMR:0 },
+  {id:"2v2",        name:"2v2 Dobles",    icon:"🎯", color:"#5865F2", group:"standard", initMMR:0 },
+  {id:"1v1",        name:"1v1 Duelo",     icon:"⚡", color:"#5865F2", group:"standard", initMMR:0 },
+  {id:"heatseeker", name:"Heatseeker",    icon:"🔥", color:"#ED4245", group:"special",  initMMR:0 },
+  {id:"rumble",     name:"Rumble",        icon:"🎲", color:"#FEE75C", group:"special",  initMMR:0 },
+  {id:"hoops",      name:"Hoops",         icon:"🏀", color:"#EB459E", group:"special",  initMMR:0 },
+  {id:"snowday",    name:"Snowday",       icon:"❄️", color:"#57F287", group:"special",  initMMR:0 },
+  {id:"dropshot",   name:"Dropshot",      icon:"💎", color:"#9B59B6", group:"special",  initMMR:0 },
+];
+
+const STD_ERRORS = [
+  {id:"whiff",      label:"Whiff en Aerial"},
+  {id:"overcommit", label:"Overcommit / Doble Commit"},
+  {id:"rotacion",   label:"Mala Rotación"},
+  {id:"open_net",   label:"Open Net Fallado"},
+  {id:"kickoff",    label:"Kickoff Perdido"},
+  {id:"boost",      label:"Boost Mal Gestionado"},
+];
+const SPE_GENERIC = [
+  {id:"posicion",  label:"Error de Posicionamiento"},
+  {id:"timing",    label:"Mal Timing en Remate"},
+  {id:"cincuenta", label:"Perdiste el 50/50"},
+];
+const SPE_SPECIFIC = {
+  heatseeker:[{id:"posdef",  label:"Mal Posicionamiento Defensivo"}],
+  rumble:    [{id:"powerup", label:"Falló el Power-Up"}],
+  hoops:     [{id:"aro",     label:"Mal Remate al Aro"}],
+  snowday:   [{id:"puck",    label:"Perdió Control del Puck"}],
+  dropshot:  [{id:"panel",   label:"Falló el Panel Objetivo"}],
+};
+function getModeErrors(mode){ return mode.group==="standard"?STD_ERRORS:[...SPE_GENERIC,...(SPE_SPECIFIC[mode.id]||[])]; }
+function is1v1(id){ return id==="1v1"; }
+
+const TOURNAMENT_ROUNDS = ["Fase de Grupos","Ronda de 16","Cuartos de Final","Semifinal","Final","Gran Final"];
+
+const SKEY="rlt3f_s", MKEY="rlt3f_m", TKEY="rlt3f_t", CKEY="rlt3f_cfg";
+const today=new Date().toLocaleDateString("es-ES");
+
+const PLACEMENT_SESSIONS=[];
+
+function loadSessions(){ try{const s=localStorage.getItem(SKEY);if(s)return JSON.parse(s);}catch{}return []; }
+function saveSessions(s){ localStorage.setItem(SKEY,JSON.stringify(s)); }
+function loadMMR(){
+  try{const s=localStorage.getItem(MKEY);if(s)return JSON.parse(s);}catch{}
+  const h={};MODES.forEach(m=>{h[m.id]=[{date:today,mmr:m.initMMR}];});return h;
+}
+function saveMMR(h){ localStorage.setItem(MKEY,JSON.stringify(h)); }
+function loadTournaments(){ try{const s=localStorage.getItem(TKEY);if(s)return JSON.parse(s);}catch{}return []; }
+function saveTournaments(t){ localStorage.setItem(TKEY,JSON.stringify(t)); }
+function loadConfig(){
+  try{const s=localStorage.getItem(CKEY);if(s)return JSON.parse(s);}catch{}
+  const cfg={};MODES.forEach(m=>{cfg[m.id]=[...DEFAULT_MODE_RANKS[m.id]];});return cfg;
+}
+function saveConfig(c){ localStorage.setItem(CKEY,JSON.stringify(c)); }
+
+function getLatestMMR(hist,id,fb){ const h=hist[id]||[];return h.length>0?h[h.length-1].mmr:fb; }
+function getMMRTrend(hist,id){ const h=hist[id]||[];return h.length<2?0:h[h.length-1].mmr-h[0].mmr; }
+function avgErr(sessions,mid,eid){ const ms=sessions.filter(s=>s.modeId===mid);let t=0,c=0;ms.forEach(s=>s.matches.forEach(m=>{t+=(m.errors[eid]||0);c++;}));return c>0?t/c:null; }
+function isWin(m){ return m.result==="win"||m.result==="mvp"; }
+
+const C={
+  bg:"#111214",surface:"#1e1f2e",card:"#252636",hover:"#2e2f42",border:"#2e3050",
+  text:"#ffffff",sub:"#b9bbbe",muted:"#72767d",
+  green:"#57F287",red:"#ED4245",amber:"#FEE75C",blue:"#5865F2",teal:"#1abc9c",orange:"#E67E22",
+};
+
+function Sparkline({data,color,height=40}){
+  if(data.length<2)return <div style={{height,display:"flex",alignItems:"center",color:"#4a4f6a",fontSize:11}}>Sin historial aún</div>;
+  const W=300,H=height,P=4;
+  const vals=data.map(d=>d.mmr),mn=Math.min(...vals)-5,mx=Math.max(...vals)+5,rng=mx-mn||1;
+  const pts=data.map((d,i)=>({x:P+(i/(data.length-1))*(W-P*2),y:H-P-((d.mmr-mn)/rng)*(H-P*2)}));
+  const path=pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const area=path+` L${pts[pts.length-1].x},${H} L${pts[0].x},${H} Z`;
+  const gid="gx"+color.replace("#","");
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height}}>
+      <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={color} stopOpacity="0.3"/>
+        <stop offset="100%" stopColor={color} stopOpacity="0"/>
+      </linearGradient></defs>
+      <path d={area} fill={`url(#${gid})`}/>
+      <path d={path} stroke={color} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+      {pts.map((p,i)=>i===pts.length-1&&<circle key={i} cx={p.x} cy={p.y} r={3} fill={color}/>)}
+    </svg>
+  );
+}
+
+const Card=({children,style:ex={}})=><div style={{background:C.card,borderRadius:12,padding:"20px",border:`1px solid ${C.border}`,...ex}}>{children}</div>;
+const StatBlock=({label,value,valueColor=C.text})=>(
+  <div>
+    <div style={{fontSize:11,color:C.muted,fontWeight:500,textTransform:"uppercase",letterSpacing:.8,marginBottom:4}}>{label}</div>
+    <div style={{fontSize:26,fontWeight:700,color:valueColor,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{value}</div>
+  </div>
+);
+const PrimaryBtn=({onClick,children,color=C.blue,disabled=false,style:ex={}})=>(
+  <button onClick={onClick} disabled={disabled}
+    style={{background:disabled?C.border:color,color:disabled?C.muted:"#fff",border:"none",borderRadius:8,padding:"12px 24px",fontSize:14,fontWeight:600,width:"100%",opacity:disabled?.5:1,...ex}}>
+    {children}
+  </button>
+);
+const SecondaryBtn=({onClick,children,disabled=false})=>(
+  <button onClick={onClick} disabled={disabled}
+    style={{background:C.hover,color:disabled?C.muted:C.sub,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 24px",fontSize:14,fontWeight:500,width:"100%",opacity:disabled?.5:1}}>
+    {children}
+  </button>
+);
+const GhostBtn=({onClick,children,color=C.muted})=>(
+  <button onClick={onClick} style={{background:"none",color,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 16px",fontSize:13,fontWeight:500}}>
+    {children}
+  </button>
+);
+const Tag=({children,color})=><span style={{background:`${color}20`,color,borderRadius:4,padding:"2px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{children}</span>;
+const NumInput=({value,onChange,placeholder,large=false,style:ex={}})=>(
+  <input type="number" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
+    style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:large?"14px 16px":"8px 10px",color:C.text,fontSize:large?24:14,fontWeight:700,fontFamily:"'DM Mono',monospace",width:"100%",...ex}}/>
+);
+const ResultBadge=({result})=>{
+  const map={win:["Victoria",C.green],mvp:["MVP 👑",C.amber],loss:["Derrota",C.red],draw:["Empate","#7289da"]};
+  const [l,col]=map[result]||["—",C.muted];
+  return <Tag color={col}>{l}</Tag>;
+};
+const ScoreBadge=({score})=>{
+  if(!score)return <span style={{color:C.muted,fontSize:12}}>—</span>;
+  const col=score.us>score.them?C.green:score.us<score.them?C.red:"#7289da";
+  return <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:col}}>{score.us}–{score.them}</span>;
+};
+
+function MMREditModal({mode,currentMMR,config,onSave,onClose}){
+  const [val,setVal]=useState(String(currentMMR));
+  const rank=val&&!isNaN(val)?getRank(Number(val),mode.id,config):null;
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={onClose}>
+      <div style={{background:C.surface,borderRadius:16,padding:"28px",width:360,border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+          <div style={{width:40,height:40,borderRadius:10,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{mode.icon}</div>
+          <div><div style={{fontWeight:700,color:C.text,fontSize:16}}>{mode.name}</div><div style={{fontSize:12,color:C.muted}}>Ajustar MMR actual</div></div>
+        </div>
+        <NumInput value={val} onChange={setVal} placeholder="Ej: 620" large/>
+        {rank&&<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,marginBottom:20}}>
+          <div style={{width:8,height:8,borderRadius:2,background:rank.color}}/>
+          <span style={{fontSize:13,color:rank.color,fontWeight:500}}>{rank.name}</span>
+        </div>}
+        <div style={{fontSize:12,color:C.muted,marginBottom:20,lineHeight:1.6,background:`${C.amber}10`,borderRadius:8,padding:"10px 12px",border:`1px solid ${C.amber}30`}}>
+          ⚠️ Agrega punto de corrección al historial. No borra datos anteriores.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <SecondaryBtn onClick={onClose}>Cancelar</SecondaryBtn>
+          <PrimaryBtn onClick={()=>onSave(Number(val))} color={mode.color} disabled={!val||isNaN(val)}>Guardar MMR</PrimaryBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PersonalStatFields({duel,scoreUs,setScoreUs,scoreThem,setScoreThem,myGoals,setMyGoals,myAssists,setMyAssists,mySaves,setMySaves,compact=false}){
+  const pad=compact?"8px 10px":"10px 12px";
+  return(
+    <div style={{display:"grid",gridTemplateColumns:`1fr 20px 1fr${!duel?" 1fr 1fr 1fr":""}`,alignItems:"center",gap:8}}>
+      <div><div style={{fontSize:11,color:C.muted,marginBottom:4}}>GF (equipo)</div><NumInput value={scoreUs} onChange={setScoreUs} placeholder="0" style={{padding:pad}}/></div>
+      <div style={{textAlign:"center",color:C.muted,fontWeight:700,paddingTop:20}}>–</div>
+      <div><div style={{fontSize:11,color:C.muted,marginBottom:4}}>GC (equipo)</div><NumInput value={scoreThem} onChange={setScoreThem} placeholder="0" style={{padding:pad}}/></div>
+      {!duel&&<>
+        <div><div style={{fontSize:11,color:C.green,marginBottom:4,fontWeight:600}}>⚽ Mis goles</div><NumInput value={myGoals??""} onChange={setMyGoals} placeholder="0" style={{padding:pad}}/></div>
+        <div><div style={{fontSize:11,color:C.blue,marginBottom:4,fontWeight:600}}>🎯 Asistencias</div><NumInput value={myAssists??""} onChange={setMyAssists} placeholder="0" style={{padding:pad}}/></div>
+        <div><div style={{fontSize:11,color:C.teal,marginBottom:4,fontWeight:600}}>🧤 Salvadas</div><NumInput value={mySaves??""} onChange={setMySaves} placeholder="0" style={{padding:pad}}/></div>
+      </>}
+    </div>
+  );
+}
+
+const TIERS=[
+  {label:"Supersonic / Grand Champion", range:[0,3],  borderColor:"#FF4DC4"},
+  {label:"Champion",                    range:[4,6],  borderColor:"#9B59B6"},
+  {label:"Diamond",                     range:[7,9],  borderColor:"#5DADE2"},
+  {label:"Platinum",                    range:[10,12],borderColor:"#76D7C4"},
+  {label:"Gold",                        range:[13,15],borderColor:"#F4D03F"},
+  {label:"Silver",                      range:[16,18],borderColor:"#BDC3C7"},
+  {label:"Bronze",                      range:[19,21],borderColor:"#CD7F32"},
+];
+
+function SettingsPage({config,onSaveConfig}){
+  const [draft,setDraft]=useState(()=>JSON.parse(JSON.stringify(config)));
+  const [selMode,setSelMode]=useState(MODES[0].id);
+  const [saved,setSaved]=useState(false);
+  const mode=MODES.find(m=>m.id===selMode);
+  const setVal=(modeId,rankIdx,val)=>{
+    setDraft(prev=>{const next={...prev,[modeId]:[...(prev[modeId]||DEFAULT_MODE_RANKS[modeId])]};next[modeId][rankIdx]=val===""?0:Number(val);return next;});
+    setSaved(false);
+  };
+  const resetMode=()=>{ setDraft(prev=>({...prev,[selMode]:[...DEFAULT_MODE_RANKS[selMode]]})); setSaved(false); };
+  const save=()=>{ onSaveConfig(draft); setSaved(true); setTimeout(()=>setSaved(false),2000); };
+  const currentMins=draft[selMode]||DEFAULT_MODE_RANKS[selMode];
+  return(
+    <div style={{padding:"32px"}}>
+      <div style={{marginBottom:28}}>
+        <h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>⚙️ Configuración de rangos</h1>
+        <p style={{fontSize:14,color:C.muted}}>MMR mínimo por división por playlist. Cada modo es independiente.</p>
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:24}}>
+        {MODES.map(m=>(
+          <button key={m.id} onClick={()=>setSelMode(m.id)}
+            style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${selMode===m.id?m.color:C.border}`,background:selMode===m.id?`${m.color}20`:"none",color:selMode===m.id?C.text:C.muted,fontSize:13,fontWeight:selMode===m.id?600:400}}>
+            {m.icon} {m.name}
+          </button>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 260px",gap:20}}>
+        <Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+            <div><div style={{fontSize:15,fontWeight:700,color:C.text}}>{mode.name}</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>SSL → Bronze I</div></div>
+            <GhostBtn onClick={resetMode} color={C.amber}>↺ Restablecer defaults</GhostBtn>
+          </div>
+          {TIERS.map(tier=>(
+            <div key={tier.label} style={{marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:8,paddingLeft:8,borderLeft:`2px solid ${tier.borderColor}`,paddingTop:2,paddingBottom:2}}>{tier.label}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                {RANK_DEFS.slice(tier.range[0],tier.range[1]+1).map((r,relIdx)=>{
+                  const absIdx=tier.range[0]+relIdx;
+                  const val=currentMins[absIdx]??0;
+                  return(
+                    <div key={r.name} style={{background:C.surface,borderRadius:8,padding:"10px 12px",border:`1px solid ${C.border}`}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                        <div style={{width:8,height:8,borderRadius:2,background:r.color,flexShrink:0}}/>
+                        <span style={{fontSize:12,color:C.text,fontWeight:500}}>{r.name}</span>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <input type="number" value={val} onChange={e=>setVal(selMode,absIdx,e.target.value)}
+                          style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 10px",color:r.color,fontSize:16,fontWeight:700,fontFamily:"'DM Mono',monospace",width:"100%",outline:"none"}}/>
+                        <span style={{fontSize:11,color:C.muted,flexShrink:0}}>MMR</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </Card>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <Card>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Vista previa — {mode.name}</div>
+            {[984,818,740,620,500,388,274,166].map(testMMR=>{
+              const r=getRank(testMMR,selMode,draft);
+              return(
+                <div key={testMMR} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,color:C.text,fontWeight:600}}>{testMMR}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:6,height:6,borderRadius:1,background:r.color}}/>
+                    <span style={{fontSize:12,color:r.color,fontWeight:500}}>{r.name}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </Card>
+          <PrimaryBtn onClick={save} color={saved?C.green:C.blue}>{saved?"✓ Guardado":"💾 Guardar cambios"}</PrimaryBtn>
+          <div style={{fontSize:12,color:C.muted,lineHeight:1.6,textAlign:"center"}}>Los cambios se aplican en toda la app de inmediato.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─── CLOUD SYNC (JSONBin) ────────────────────────────────────────────────────
+
+const JKEY = 'rlt3f_jcfg'; // local device config: {apiKey, binId}
+
+function getCloudCfg() {
+  try { const s = localStorage.getItem(JKEY); return s ? JSON.parse(s) : null; } catch { return null; }
+}
+function saveCloudCfg(cfg) { localStorage.setItem(JKEY, JSON.stringify(cfg)); }
+
+function bundleData(sessions, mmrHist, tournaments, config) {
+  return { sessions, mmrHistory: mmrHist, tournaments, config, lastSync: Date.now() };
+}
+function unbundleData(record) {
+  return {
+    sessions:    record.sessions    || [],
+    mmrHistory:  record.mmrHistory  || {},
+    tournaments: record.tournaments || [],
+    config:      record.config      || {},
+  };
+}
+
+async function pushToCloud(bundle) {
+  const cfg = getCloudCfg();
+  if (!cfg || !cfg.apiKey || !cfg.binId) return { ok: false, reason: 'no_config' };
+  try {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Master-Key': cfg.apiKey },
+      body: JSON.stringify(bundle)
+    });
+    return { ok: res.ok, status: res.status };
+  } catch (e) { return { ok: false, reason: 'network' }; }
+}
+
+async function pullFromCloud() {
+  const cfg = getCloudCfg();
+  if (!cfg || !cfg.apiKey || !cfg.binId) return null;
+  try {
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${cfg.binId}/latest`, {
+      headers: { 'X-Master-Key': cfg.apiKey }
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.record || null;
+  } catch { return null; }
+}
+
+// ─── CLOUD CONFIG MODAL ───────────────────────────────────────────────────────
+
+function CloudConfigModal({ onClose, onSaved }) {
+  const existing = getCloudCfg() || {};
+  const [apiKey, setApiKey] = useState(existing.apiKey || '');
+  const [binId,  setBinId]  = useState(existing.binId  || '');
+  const [status, setStatus] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  const testAndSave = async () => {
+    if (!apiKey || !binId) return;
+    setTesting(true); setStatus('Probando conexión…');
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
+      headers: { 'X-Master-Key': apiKey }
+    });
+    setTesting(false);
+    if (res.ok) {
+      saveCloudCfg({ apiKey, binId });
+      setStatus('✓ Conexión exitosa. Configuración guardada.');
+      setTimeout(() => { onSaved({ apiKey, binId }); onClose(); }, 1200);
+    } else {
+      setStatus('✕ Error ' + res.status + '. Verifica tu API Key y Bin ID.');
+    }
+  };
+
+  const clear = () => { localStorage.removeItem(JKEY); onClose(); };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000}} onClick={onClose}>
+      <div style={{background:C.surface,borderRadius:16,padding:'28px',width:440,border:`1px solid ${C.border}`,maxHeight:'90vh',overflow:'auto'}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:20}}>
+          <div style={{fontSize:28}}>☁️</div>
+          <div>
+            <div style={{fontWeight:700,color:C.text,fontSize:16}}>Sync en la nube</div>
+            <div style={{fontSize:12,color:C.muted}}>JSONBin.io · Gratis · Multi-dispositivo</div>
+          </div>
+        </div>
+
+        <div style={{background:`${C.amber}10`,border:`1px solid ${C.amber}30`,borderRadius:8,padding:'12px',fontSize:12,color:C.amber,marginBottom:20,lineHeight:1.7}}>
+          <strong>Cómo configurar:</strong><br/>
+          1. Crea cuenta gratis en <strong>jsonbin.io</strong><br/>
+          2. Dashboard → API Keys → copia tu <strong>Master Key</strong><br/>
+          3. Bins → Create New Bin → pega <code style={{background:'#00000030',padding:'1px 4px',borderRadius:3}}>{'{}'}</code> → copia el <strong>Bin ID</strong><br/>
+          4. Pega ambos abajo y haz clic en "Probar y guardar"
+        </div>
+
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:6}}>Master Key (X-Master-Key)</div>
+          <input value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="$2a$10$..."
+            style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px',color:C.text,fontSize:13,width:'100%',fontFamily:'monospace'}}/>
+        </div>
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:6}}>Bin ID</div>
+          <input value={binId} onChange={e=>setBinId(e.target.value)} placeholder="64f3a..."
+            style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px 12px',color:C.text,fontSize:13,width:'100%',fontFamily:'monospace'}}/>
+        </div>
+
+        {status && <div style={{padding:'10px 12px',borderRadius:8,background:status.startsWith('✓')?`${C.green}15`:`${C.red}15`,color:status.startsWith('✓')?C.green:C.red,fontSize:13,marginBottom:16}}>{status}</div>}
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <button onClick={clear} style={{background:'none',color:C.muted,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px',fontSize:13,cursor:'pointer'}}>Desactivar sync</button>
+          <button onClick={testAndSave} disabled={!apiKey||!binId||testing}
+            style={{background:(!apiKey||!binId||testing)?C.border:C.blue,color:(!apiKey||!binId||testing)?C.muted:'#fff',border:'none',borderRadius:8,padding:'10px',fontSize:13,fontWeight:600,cursor:'pointer'}}>
+            {testing ? '⟳ Probando…' : '✓ Probar y guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── IMPORT / EXPORT MODAL ────────────────────────────────────────────────────
+
+function ImportExportModal({ onClose, onImport }) {
+  const [status, setStatus] = useState('');
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        const bundle = {};
+        if (data.rlt3_s)   bundle.sessions    = data.rlt3_s;
+        if (data.rlt3_m)   bundle.mmrHistory  = data.rlt3_m;
+        if (data.rlt3_t)   bundle.tournaments = data.rlt3_t;
+        if (data.rlt3_cfg) bundle.config      = data.rlt3_cfg;
+        // Also support direct bundle format
+        if (data.sessions)    bundle.sessions    = bundle.sessions    || data.sessions;
+        if (data.mmrHistory)  bundle.mmrHistory  = bundle.mmrHistory  || data.mmrHistory;
+        if (data.tournaments) bundle.tournaments = bundle.tournaments || data.tournaments;
+        if (data.config)      bundle.config      = bundle.config      || data.config;
+        const keys = Object.keys(bundle).length;
+        if (keys === 0) { setStatus('✕ Formato no reconocido.'); return; }
+        onImport(bundle);
+        setStatus(`✓ ${keys} secciones importadas correctamente.`);
+        setTimeout(onClose, 1500);
+      } catch { setStatus('✕ Archivo JSON inválido.'); }
+    };
+    reader.readAsText(file);
+  };
+
+  const exportNow = () => {
+    const bundle = {
+      exportDate: new Date().toISOString(),
+      version: 'v7',
+      rlt3_s:   JSON.parse(localStorage.getItem('rlt3f_s')  || '[]'),
+      rlt3_m:   JSON.parse(localStorage.getItem('rlt3f_m')  || '{}'),
+      rlt3_t:   JSON.parse(localStorage.getItem('rlt3f_t')  || '[]'),
+      rlt3_cfg: JSON.parse(localStorage.getItem('rlt3f_cfg')|| '{}'),
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `rl-tracker-backup-${new Date().toISOString().slice(0,10)}.json`; a.click();
+    setStatus('✓ Backup descargado.');
+  };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000}} onClick={onClose}>
+      <div style={{background:C.surface,borderRadius:16,padding:'28px',width:400,border:`1px solid ${C.border}`}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontWeight:700,color:C.text,fontSize:16,marginBottom:4}}>📦 Importar / Exportar</div>
+        <div style={{fontSize:12,color:C.muted,marginBottom:20}}>Migra datos desde el proyecto Vite o haz un backup manual</div>
+
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:12,color:C.sub,fontWeight:600,marginBottom:8}}>Importar desde JSON</div>
+          <label style={{display:'block',padding:'12px',border:`2px dashed ${C.border}`,borderRadius:8,textAlign:'center',cursor:'pointer',color:C.muted,fontSize:13}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor=C.blue} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+            Clic para seleccionar archivo JSON
+            <input type="file" accept=".json" onChange={handleFile} style={{display:'none'}}/>
+          </label>
+        </div>
+
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:12,color:C.sub,fontWeight:600,marginBottom:8}}>Exportar backup</div>
+          <button onClick={exportNow} style={{width:'100%',padding:'10px',background:C.hover,border:`1px solid ${C.border}`,borderRadius:8,color:C.sub,fontSize:13,cursor:'pointer',fontWeight:500}}>
+            ⬇ Descargar rl-tracker-backup.json
+          </button>
+        </div>
+
+        {status && <div style={{padding:'10px',borderRadius:8,background:status.startsWith('✓')?`${C.green}15`:`${C.red}15`,color:status.startsWith('✓')?C.green:C.red,fontSize:13,marginBottom:14}}>{status}</div>}
+
+        <button onClick={onClose} style={{width:'100%',padding:'10px',background:'none',border:`1px solid ${C.border}`,borderRadius:8,color:C.muted,fontSize:13,cursor:'pointer'}}>Cerrar</button>
+      </div>
+    </div>
+  );
+}
+
+function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,playerName}){
+  const [open,setOpen]=useState(true);
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  React.useEffect(()=>{
+    const fn=()=>{const isMob=window.innerWidth<=768;setMobile(isMob);if(isMob)setOpen(false);else setOpen(true);};
+    window.addEventListener('resize',fn);fn();return()=>window.removeEventListener('resize',fn);
+  },[]);
+  const sidebarWidth=open?240:64;
+  return(
+    <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text}}>
+      {mobile&&<div className={`overlay${open?' active':''}`} onClick={()=>setOpen(false)}/>}
+      <Sidebar activePage={activePage} onNavigate={onNavigate} sessions={sessions} mmrHistory={mmrHistory} tournaments={tournaments} config={config}
+        syncStatus={syncStatus} syncLabel={syncLabel} syncColor={syncColor} lastSync={lastSync} onOpenCloud={onOpenCloud} onOpenImport={onOpenImport} onPullNow={onPullNow} cloudCfg={cloudCfg}
+        open={open} mobile={mobile} onClose={()=>setOpen(false)} playerName={playerName}/>
+      <div style={{flex:1,overflow:"auto",marginLeft:mobile?0:0,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:C.surface,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:50}}>
+          <button onClick={()=>setOpen(o=>!o)}
+            style={{width:36,height:36,borderRadius:8,border:`1px solid ${C.border}`,background:"none",color:C.sub,fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            {open&&mobile?'✕':'☰'}
+          </button>
+          <div style={{fontSize:14,fontWeight:600,color:C.text}}>🚗 RL Tracker</div>
+          <div style={{flex:1}}/>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:syncColor,flexShrink:0}}/>
+            <span style={{fontSize:11,color:syncColor,fontWeight:600}}>{syncLabel}</span>
+          </div>
+        </div>
+        <div>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose,playerName}){
+  const w=mobile?(open?280:0):(open?240:64);
+  const nav=(p)=>{onNavigate(p);if(mobile)onClose();};
+  if(mobile&&!open)return null;
+  return(
+    <div style={{width:w,minWidth:w,background:C.surface,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",
+      position:mobile?"fixed":"sticky",top:0,height:"100vh",overflow:"auto",flexShrink:0,zIndex:100,
+      transform:mobile&&!open?"translateX(-100%)":"translateX(0)",transition:"transform .2s ease, width .2s ease"}}>
+      {!mobile&&<div style={{padding:open?"20px 16px":"12px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
+        {open&&<div><div style={{fontSize:16,fontWeight:700,color:C.text}}>🚗 RL Tracker</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>Performance Intelligence</div></div>}
+        {!open&&<div style={{fontSize:20,margin:"0 auto"}}>🚗</div>}
+      </div>}
+      {mobile&&<div style={{padding:"16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontSize:15,fontWeight:700,color:C.text}}>🚗 RL Tracker</div>
+        <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:20,cursor:"pointer"}}>✕</button>
+      </div>}
+      <div style={{padding:"12px 8px",borderBottom:`1px solid ${C.border}`}}>
+        {[{id:"home",label:"Inicio",icon:"🏠"},{id:"stats",label:"Estadísticas",icon:"📊"},{id:"tournaments",label:"Torneos",icon:"🏆"},{id:"settings",label:"Configuración",icon:"⚙️"}].map(item=>(
+          <button key={item.id} onClick={()=>nav(item.id)} title={!open?item.label:undefined}
+            style={{display:"flex",alignItems:"center",gap:open?10:0,justifyContent:open?"flex-start":"center",width:"100%",padding:open?"8px 10px":"8px",borderRadius:6,border:"none",background:activePage===item.id?C.hover:"none",color:activePage===item.id?C.text:C.sub,fontSize:14,fontWeight:activePage===item.id?600:400,textAlign:"left",marginBottom:2}}>
+            <span style={{fontSize:open?14:18}}>{item.icon}</span>
+            {open&&<span style={{flex:1}}>{item.label}</span>}
+            {open&&item.id==="tournaments"&&tournaments.length>0&&<span style={{background:`${C.orange}25`,color:C.orange,borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>{tournaments.length}</span>}
+          </button>
+        ))}
+      </div>
+      <div style={{flex:1,overflow:"auto",padding:"12px 8px"}}>
+        {[["standard","Estándar"],["special","Especiales"]].map(([group,label])=>(
+          <div key={group}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,letterSpacing:1,padding:"8px 10px 6px",textTransform:"uppercase"}}>{label}</div>
+            {MODES.filter(m=>m.group===group).map(m=>{
+              const mmr=getLatestMMR(mmrHistory,m.id,m.initMMR),trend=getMMRTrend(mmrHistory,m.id),isActive=activePage===`session_${m.id}`;
+              return(
+                <button key={m.id} onClick={()=>nav(`session_${m.id}`)} title={!open?m.name:undefined}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 10px",borderRadius:6,border:"none",background:isActive?`${m.color}22`:"none",color:isActive?C.text:C.sub,fontSize:13,textAlign:"left",marginBottom:2}}
+                  onMouseEnter={e=>{if(!isActive)e.currentTarget.style.background=C.hover;}}
+                  onMouseLeave={e=>{if(!isActive)e.currentTarget.style.background="none";}}>
+                  <span style={{fontSize:open?14:18}}>{m.icon}</span>
+                  {open&&<div style={{flex:1}}>{m.name}</div>}
+                  {open&&<div style={{textAlign:"right"}}>
+                    <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:isActive?m.color:C.sub}}>{mmr}</div>
+                    {trend!==0&&<div style={{fontSize:10,color:trend>0?C.green:C.red}}>{trend>0?"+":""}{trend}</div>}
+                  </div>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      {/* Cloud sync panel */}
+      <div style={{borderTop:`1px solid ${C.border}`,padding:open?'12px 8px':'8px 4px'}}>
+        {open?<>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:syncColor,flexShrink:0}}/>
+            <span style={{fontSize:11,color:syncColor,fontWeight:600,flex:1}}>{syncLabel}</span>
+            {lastSync&&<span style={{fontSize:10,color:C.muted}}>{lastSync.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</span>}
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+            <button onClick={onOpenCloud}
+              style={{padding:'6px 4px',borderRadius:6,border:`1px solid ${cloudCfg?C.border:C.blue}`,background:cloudCfg?'none':`${C.blue}20`,color:cloudCfg?C.muted:C.blue,fontSize:11,cursor:'pointer',fontWeight:500}}>
+              {cloudCfg?'⚙ Config':'☁ Activar'}
+            </button>
+            <button onClick={cloudCfg?onPullNow:onOpenImport}
+              style={{padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
+              {cloudCfg?'⬇ Pull':'📦 Import'}
+            </button>
+          </div>
+          <button onClick={onOpenImport}
+            style={{width:'100%',marginTop:6,padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
+            📦 Importar / Exportar JSON
+          </button>
+        </>:<div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'center'}}>
+          <button onClick={onOpenCloud} title="Config nube" style={{width:36,height:36,borderRadius:8,border:`1px solid ${cloudCfg?C.border:C.blue}`,background:cloudCfg?'none':`${C.blue}20`,color:cloudCfg?C.muted:C.blue,fontSize:14,cursor:'pointer'}}>☁</button>
+          <button onClick={onOpenImport} title="Importar/Exportar" style={{width:36,height:36,borderRadius:8,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:14,cursor:'pointer'}}>📦</button>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+function HomePage({sessions,mmrHistory,tournaments,config,onNavigate,onEditMMR}){
+  const totalMatches=sessions.reduce((a,s)=>a+s.matches.length,0);
+  return(
+    <div className="page-pad" style={{padding:"32px"}}>
+      <div style={{marginBottom:28}}>
+        <h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>Panel General</h1>
+        <p style={{fontSize:14,color:C.muted}}>Clic en modo → nueva sesión · ✏️ → ajustar MMR</p>
+      </div>
+      <div className="stat-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
+        {[{label:"Sesiones",value:sessions.length,color:C.blue},{label:"Partidas",value:totalMatches,color:C.green},{label:"Torneos",value:tournaments.length,color:C.orange},{label:"Modos activos",value:MODES.filter(m=>sessions.some(s=>s.modeId===m.id)).length,color:C.amber}]
+          .map(item=><Card key={item.label}><StatBlock label={item.label} value={item.value} valueColor={item.color}/></Card>)}
+      </div>
+      {[["standard","Modos Estándar","repeat(3,1fr)"],["special","Modos Especiales","repeat(5,1fr)"]].map(([group,label,cols])=>(
+        <div key={group} style={{marginBottom:24}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:12}}>{label}</div>
+          <div style={{display:"grid",gridTemplateColumns:cols,gap:12}}>
+            {MODES.filter(m=>m.group===group).map(m=>{
+              const mmr=getLatestMMR(mmrHistory,m.id,m.initMMR),rank=getRank(mmr,m.id,config),trend=getMMRTrend(mmrHistory,m.id);
+              const mS=sessions.filter(s=>s.modeId===m.id),mM=mS.reduce((a,s)=>a+s.matches.length,0),mW=mS.reduce((a,s)=>a+s.matches.filter(isWin).length,0);
+              const isStd=group==="standard";
+              return(
+                <div key={m.id} style={{background:C.card,borderRadius:12,padding:"20px",border:`1px solid ${C.border}`,cursor:"pointer",position:"relative"}}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor=m.color;e.currentTarget.style.background=C.hover;}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.background=C.card;}}
+                  onClick={()=>onNavigate(`session_${m.id}`)}>
+                  <button onClick={e=>{e.stopPropagation();onEditMMR(m);}} title="Ajustar MMR"
+                    style={{position:"absolute",top:10,right:10,background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"3px 7px",fontSize:11,color:C.muted,zIndex:1}}
+                    onMouseEnter={e=>{e.stopPropagation();e.currentTarget.style.color=C.amber;e.currentTarget.style.borderColor=C.amber;}}
+                    onMouseLeave={e=>{e.currentTarget.style.color=C.muted;e.currentTarget.style.borderColor=C.border;}}>✏️</button>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:isStd?14:8,paddingRight:36}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:isStd?38:30,height:isStd?38:30,borderRadius:10,background:`${m.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:isStd?20:16}}>{m.icon}</div>
+                      <div>
+                        <div style={{fontSize:isStd?14:13,fontWeight:600,color:C.text}}>{m.name}</div>
+                        <div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:isStd?24:20,fontWeight:700,color:C.text}}>{mmr}</div>
+                      {trend!==0&&<div style={{fontSize:11,color:trend>0?C.green:C.red}}>{trend>0?"▲ +":"▼ "}{trend}</div>}
+                    </div>
+                  </div>
+                  {isStd&&<Sparkline data={mmrHistory[m.id]||[]} color={m.color} height={36}/>}
+                  <div style={{display:"flex",gap:10,marginTop:isStd?10:8,paddingTop:isStd?10:8,borderTop:`1px solid ${C.border}`}}>
+                    <span style={{fontSize:11,color:C.muted}}>{mS.length} ses.</span>
+                    <span style={{fontSize:11,color:C.muted}}>·</span>
+                    <span style={{fontSize:11,color:C.muted}}>{mM>0?`${Math.round(mW/mM*100)}% win`:"Sin partidas"}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SessionDetailPage({session,config,onBack,onUpdateSession}){
+  const mode=MODES.find(m=>m.id===session.modeId)||{name:session.modeName,color:C.blue,icon:"🎮"};
+  const errors=getModeErrors(mode),duel=is1v1(session.modeId);
+  const [editing,setEditing]=useState(false),[draft,setDraft]=useState(null);
+  const startEdit=()=>{setDraft(JSON.parse(JSON.stringify(session)));setEditing(true);};
+  const cancelEdit=()=>{setDraft(null);setEditing(false);};
+  const saveEdit=()=>{onUpdateSession(draft);setEditing(false);setDraft(null);};
+  const setMF=(idx,field,val)=>{
+    setDraft(prev=>{
+      const matches=prev.matches.map((m,i)=>{
+        if(i!==idx)return m;
+        if(field==="scoreUs")return {...m,score:{...m.score,us:val===""?null:Number(val)}};
+        if(field==="scoreThem")return {...m,score:{...m.score,them:val===""?null:Number(val)}};
+        if(["myGoals","myAssists","mySaves"].includes(field))return {...m,[field]:val===""?null:Number(val)};
+        if(field==="result")return {...m,result:val};
+        if(field.startsWith("err_")){const eid=field.replace("err_","");return {...m,errors:{...m.errors,[eid]:val===""?0:Number(val)}};}
+        return m;
+      });
+      return {...prev,matches};
+    });
+  };
+  const setMMRF=(field,val)=>setDraft(prev=>({...prev,[field]:val===""?null:Number(val)}));
+  const src=editing?draft:session;
+  const wins=src.matches.filter(isWin).length,losses=src.matches.filter(m=>m.result==="loss").length,draws=src.matches.filter(m=>m.result==="draw").length;
+  const gf=src.matches.reduce((a,m)=>a+(m.score?.us||0),0),ga=src.matches.reduce((a,m)=>a+(m.score?.them||0),0);
+  const mg=!duel?src.matches.reduce((a,m)=>a+(m.myGoals||0),0):null;
+  const ma=!duel?src.matches.reduce((a,m)=>a+(m.myAssists||0),0):null;
+  const ms=!duel?src.matches.reduce((a,m)=>a+(m.mySaves||0),0):null;
+  const mmrDelta=src.endMMR&&src.startMMR?src.endMMR-src.startMMR:null;
+  const totE=src.matches.reduce((tot,m)=>{errors.forEach(e=>{tot[e.id]=(tot[e.id]||0)+(m.errors[e.id]||0);});return tot;},{});
+  return(
+    <div style={{padding:"32px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
+        <GhostBtn onClick={onBack}>← Volver</GhostBtn>
+        <div style={{width:44,height:44,borderRadius:12,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{mode.icon}</div>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <h1 style={{fontSize:22,fontWeight:700,color:C.text}}>{mode.name}</h1>
+            {src.isPlacement&&<Tag color={C.amber}>Posicionamiento</Tag>}
+          </div>
+          <p style={{fontSize:13,color:C.muted}}>{src.date}{src.time&&src.time!=="Posicionamiento"&&` · ${src.time}`}</p>
+        </div>
+        {editing
+          ?<div style={{display:"flex",gap:10,alignItems:"flex-end"}}>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4}}>MMR inicio</div><NumInput value={draft.startMMR??""} onChange={v=>setMMRF("startMMR",v)} placeholder="—" style={{width:90}}/></div>
+            <div><div style={{fontSize:11,color:C.muted,marginBottom:4}}>MMR final</div><NumInput value={draft.endMMR??""} onChange={v=>setMMRF("endMMR",v)} placeholder="—" style={{width:90}}/></div>
+          </div>
+          :mmrDelta!==null&&<div style={{textAlign:"right"}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:2}}>MMR</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:mmrDelta>=0?C.green:C.red}}>{mmrDelta>=0?"+":""}{mmrDelta}</div>
+            <div style={{fontSize:11,color:C.muted}}>{src.startMMR} → {src.endMMR}</div>
+          </div>}
+        <div style={{display:"flex",gap:8}}>
+          {editing
+            ?<><GhostBtn onClick={cancelEdit}>Cancelar</GhostBtn><button onClick={saveEdit} style={{background:C.green,color:"#000",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700}}>✓ Guardar</button></>
+            :<GhostBtn onClick={startEdit} color={C.blue}>✏️ Editar sesión</GhostBtn>}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:`repeat(auto-fill,minmax(${!duel?'80px':'100px'},1fr))`,gap:8,marginBottom:20}}>
+        {[["Partidas",src.matches.length,C.text],["Victorias",wins,C.green],["Derrotas",losses,C.red],["Empates",draws,"#7289da"],["GF–GC",`${gf}–${ga}`,C.sub],...(!duel?[["⚽ Goles",mg??0,C.green],["🎯 Asist.",ma??0,C.blue],["🧤 Salvadas",ms??0,C.teal]]:[])].map(([l,v,col])=>(
+          <Card key={l} style={{padding:"12px 14px"}}><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:.7,marginBottom:4}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{v}</div></Card>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:20}}>
+        <Card>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <div style={{fontSize:14,fontWeight:600,color:C.sub}}>Historial de partidas</div>
+            {editing&&<span style={{fontSize:11,color:C.amber}}>✏️ Edición activa</span>}
+          </div>
+          {src.matches.map((m,i)=>{
+            const et=Object.values(m.errors).reduce((a,b)=>a+b,0);
+            const errLabels=errors.filter(e=>(m.errors[e.id]||0)>0).map(e=>`${e.label} ×${m.errors[e.id]}`);
+            if(editing)return(
+              <div key={m.id} style={{border:`1px solid ${C.border}`,borderRadius:10,padding:"14px",marginBottom:10,background:C.surface}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted,minWidth:24}}>P{i+1}</span>
+                  <select value={m.result} onChange={e=>setMF(i,"result",e.target.value)} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:13,cursor:"pointer"}}>
+                    {["win","mvp","loss","draw"].map(r=><option key={r} value={r}>{r==="win"?"Victoria":r==="mvp"?"MVP":r==="loss"?"Derrota":"Empate"}</option>)}
+                  </select>
+                </div>
+                <PersonalStatFields duel={duel} scoreUs={m.score?.us??""} setScoreUs={v=>setMF(i,"scoreUs",v)} scoreThem={m.score?.them??""} setScoreThem={v=>setMF(i,"scoreThem",v)} myGoals={m.myGoals} setMyGoals={v=>setMF(i,"myGoals",v)} myAssists={m.myAssists} setMyAssists={v=>setMF(i,"myAssists",v)} mySaves={m.mySaves} setMySaves={v=>setMF(i,"mySaves",v)} compact/>
+                <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Errores</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                    {errors.map(e=><div key={e.id} style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:11,color:C.muted}}>{e.label}</span><NumInput value={m.errors[e.id]??0} onChange={v=>setMF(i,`err_${e.id}`,v)} placeholder="0" style={{width:52,padding:"4px 8px",fontSize:13}}/></div>)}
+                  </div>
+                </div>
+              </div>
+            );
+            return(
+              <div key={m.id} style={{borderBottom:`1px solid ${C.border}`,padding:"0 4px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",flexWrap:"wrap"}}>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.muted,minWidth:24}}>P{i+1}</span>
+                  <ResultBadge result={m.result}/><ScoreBadge score={m.score}/>
+                  {!duel&&<>{m.myGoals!=null&&<Tag color={C.green}>⚽ {m.myGoals}</Tag>}{m.myAssists!=null&&<Tag color={C.blue}>🎯 {m.myAssists}</Tag>}{m.mySaves!=null&&<Tag color={C.teal}>🧤 {m.mySaves}</Tag>}</>}
+                  {et>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted,marginLeft:"auto"}}>{et} err</span>}
+                </div>
+                {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingBottom:8,paddingLeft:36}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
+              </div>
+            );
+          })}
+        </Card>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Errores de la sesión</div>
+            {errors.map(e=>{const tot=totE[e.id]||0,isFocus=src.focusError===e.id;return(
+              <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.border}`,paddingLeft:isFocus?8:0,borderLeft:isFocus?`2px solid ${mode.color}`:"none"}}>
+                <div><div style={{fontSize:12,color:isFocus?mode.color:C.sub}}>{e.label}</div>{isFocus&&<div style={{fontSize:10,color:mode.color}}>Foco</div>}</div>
+                <div style={{textAlign:"right"}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:tot>0?C.text:C.muted}}>{tot}</div><div style={{fontSize:10,color:C.muted}}>{src.matches.length>0?(tot/src.matches.length).toFixed(1):0}/p</div></div>
+              </div>
+            );})}
+          </Card>
+          {mmrDelta!==null&&<Card style={{borderColor:mmrDelta>=0?`${C.green}40`:`${C.red}40`}}>
+            <div style={{fontSize:12,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:12}}>Progresión MMR</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {[["Inicio",src.startMMR??"-",C.muted],["Final",src.endMMR??"-",C.text],["Delta",(mmrDelta>=0?"+":"")+mmrDelta,mmrDelta>=0?C.green:C.red]].map(([l,v,col])=>(
+                <div key={l}><div style={{fontSize:11,color:C.muted}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col}}>{v}</div></div>
+              ))}
+            </div>
+          </Card>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
+  const mode=MODES.find(m=>m.id===modeId),errors=getModeErrors(mode),duel=is1v1(modeId);
+  const latMMR=getLatestMMR(mmrHistory,modeId,mode.initMMR);
+  const [step,setStep]=useState("setup"),[startMMR,setStartMMR]=useState(String(latMMR)),[focusErr,setFocusErr]=useState(null);
+  const [matches,setMatches]=useState([]),[endMMR,setEndMMR]=useState(""),[currE,setCurrE]=useState({});
+  const [currR,setCurrR]=useState(null),[scoreUs,setScoreUs]=useState(""),[scoreThem,setScoreThem]=useState("");
+  const [myGoals,setMyGoals]=useState(""),[myAssists,setMyAssists]=useState(""),[mySaves,setMySaves]=useState("");
+  const totE=matches.reduce((tot,m)=>{errors.forEach(e=>{tot[e.id]=(tot[e.id]||0)+(m.errors[e.id]||0);});return tot;},{});
+  const wins=matches.filter(isWin).length,currTot=Object.values(currE).reduce((a,b)=>a+b,0);
+  const totalGF=matches.reduce((a,m)=>a+(m.score?.us||0),0),totalGA=matches.reduce((a,m)=>a+(m.score?.them||0),0);
+  const totalMG=!duel?matches.reduce((a,m)=>a+(m.myGoals||0),0):null;
+  const totalMA=!duel?matches.reduce((a,m)=>a+(m.myAssists||0),0):null;
+  const totalMS=!duel?matches.reduce((a,m)=>a+(m.mySaves||0),0):null;
+  const addMatch=()=>{
+    if(!currR)return;
+    const score=scoreUs!==""&&scoreThem!==""?{us:Number(scoreUs),them:Number(scoreThem)}:null;
+    setMatches(p=>[...p,{id:Date.now(),result:currR,errors:{...currE},score,myGoals:!duel&&myGoals!==""?Number(myGoals):null,myAssists:!duel&&myAssists!==""?Number(myAssists):null,mySaves:!duel&&mySaves!==""?Number(mySaves):null}]);
+    setCurrE({});setCurrR(null);setScoreUs("");setScoreThem("");setMyGoals("");setMyAssists("");setMySaves("");
+  };
+  const saveSession=()=>onSave({id:Date.now(),date:new Date().toLocaleDateString("es-ES"),time:new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),modeId,modeName:mode.name,focusError:focusErr,startMMR:Number(startMMR)||null,endMMR:Number(endMMR)||null,matches});
+  if(step==="setup")return(
+    <div style={{padding:"32px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
+        <div style={{width:44,height:44,borderRadius:12,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{mode.icon}</div>
+        <div><h1 style={{fontSize:24,fontWeight:700,color:C.text}}>{mode.name}</h1><p style={{fontSize:13,color:C.muted}}>Nueva sesión</p></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:20}}>
+        <div>
+          <Card style={{marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:12}}>MMR actual</div>
+            <NumInput value={startMMR} onChange={setStartMMR} placeholder="Ej: 740" large/>
+            {startMMR&&!isNaN(startMMR)&&<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}><div style={{width:8,height:8,borderRadius:2,background:getRank(Number(startMMR),modeId,config).color}}/><span style={{fontSize:13,color:getRank(Number(startMMR),modeId,config).color,fontWeight:500}}>{getRank(Number(startMMR),modeId,config).name}</span></div>}
+          </Card>
+          <PrimaryBtn onClick={()=>setStep("tracking")} color={mode.color} disabled={!startMMR||isNaN(startMMR)}>Empezar sesión →</PrimaryBtn>
+        </div>
+        <Card>
+          <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:4}}>Error Foco <span style={{color:C.muted,fontWeight:400}}>(opcional)</span></div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:14}}>El error que quieres trabajar hoy.</div>
+          {errors.map(e=>(
+            <button key={e.id} onClick={()=>setFocusErr(focusErr===e.id?null:e.id)}
+              style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 12px",borderRadius:8,border:`1px solid ${focusErr===e.id?mode.color:C.border}`,background:focusErr===e.id?`${mode.color}15`:"none",color:focusErr===e.id?C.text:C.sub,fontSize:13,textAlign:"left",marginBottom:6}}>
+              <div style={{width:16,height:16,borderRadius:4,border:`1.5px solid ${focusErr===e.id?mode.color:C.muted}`,background:focusErr===e.id?mode.color:"none",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{focusErr===e.id&&<span style={{color:"#fff",fontSize:10}}>✓</span>}</div>
+              {e.label}
+            </button>
+          ))}
+        </Card>
+      </div>
+    </div>
+  );
+  if(step==="tracking")return(
+    <div className="page-pad" style={{padding:"32px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:44,height:44,borderRadius:12,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{mode.icon}</div>
+          <div><h1 style={{fontSize:22,fontWeight:700,color:C.text}}>{mode.name}</h1><p style={{fontSize:13,color:C.muted}}>{matches.length} completadas · {wins}W / {matches.length-wins}L</p></div>
+        </div>
+        <div style={{textAlign:"right"}}><div style={{fontSize:11,color:C.muted,marginBottom:2}}>Errores esta partida</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:44,fontWeight:700,color:currTot>0?mode.color:C.border,lineHeight:1}}>{currTot}</div></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 290px",gap:20}}>
+        <div>
+          <div className="error-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+            {errors.map(e=>{const cnt=currE[e.id]||0,isFocus=focusErr===e.id;return(
+              <Card key={e.id} style={{borderColor:cnt>0?`${mode.color}60`:isFocus?`${mode.color}30`:C.border,padding:"16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:13,color:isFocus?mode.color:C.sub,fontWeight:isFocus?600:400}}>{e.label}</span>{isFocus&&<Tag color={mode.color}>Foco</Tag>}</div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <button onClick={()=>setCurrE(p=>({...p,[e.id]:Math.max(0,(p[e.id]||0)-1)}))} disabled={cnt===0} style={{width:36,height:36,borderRadius:8,border:`1px solid ${cnt>0?C.border:C.surface}`,background:cnt>0?C.hover:C.surface,color:cnt>0?C.text:C.muted,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:36,fontWeight:700,color:cnt>0?C.text:C.muted}}>{cnt}</span>
+                  <button onClick={()=>setCurrE(p=>({...p,[e.id]:(p[e.id]||0)+1}))} style={{width:36,height:36,borderRadius:8,border:`1px solid ${mode.color}50`,background:`${mode.color}15`,color:mode.color,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                </div>
+              </Card>
+            );})}
+          </div>
+          <Card>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:12}}>Resultado de la partida</div>
+            <div className="result-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:16}}>
+              {[["win","Victoria",C.green],["mvp","MVP 👑",C.amber],["loss","Derrota",C.red],["draw","Empate","#7289da"]].map(([v,l,col])=>(
+                <button key={v} onClick={()=>setCurrR(currR===v?null:v)} style={{padding:"11px 6px",borderRadius:8,border:`1.5px solid ${currR===v?col:C.border}`,background:currR===v?`${col}15`:"none",color:currR===v?col:C.sub,fontSize:13,fontWeight:currR===v?700:400}}>{l}</button>
+              ))}
+            </div>
+            <div style={{fontSize:12,fontWeight:600,color:C.sub,marginBottom:10}}>Estadísticas <span style={{color:C.muted,fontWeight:400}}>(opcional)</span></div>
+            <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
+            <div style={{marginTop:16}}><PrimaryBtn onClick={addMatch} color={mode.color} disabled={!currR}>✓ Guardar partida {matches.length+1}</PrimaryBtn></div>
+          </Card>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <Card>
+            <div style={{fontSize:12,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:14}}>Sesión</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {[["Inicio",startMMR,mode.color],["Jugadas",matches.length,C.text],["Wins",wins,C.green],["Losses",matches.length-wins,C.red]].map(([l,v,col])=>(
+                <div key={l}><div style={{fontSize:11,color:C.muted,marginBottom:2}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col}}>{v}</div></div>
+              ))}
+            </div>
+            {matches.length>0&&<div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`,display:"grid",gridTemplateColumns:`1fr 1fr${!duel?" 1fr 1fr 1fr":""}`,gap:8}}>
+              <div><div style={{fontSize:10,color:C.muted}}>GF</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.green,fontWeight:700}}>{totalGF}</div></div>
+              <div><div style={{fontSize:10,color:C.muted}}>GC</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.red,fontWeight:700}}>{totalGA}</div></div>
+              {!duel&&<><div><div style={{fontSize:10,color:C.green}}>⚽</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.green,fontWeight:700}}>{totalMG}</div></div><div><div style={{fontSize:10,color:C.blue}}>🎯</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.blue,fontWeight:700}}>{totalMA}</div></div><div><div style={{fontSize:10,color:C.teal}}>🧤</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.teal,fontWeight:700}}>{totalMS}</div></div></>}
+            </div>}
+          </Card>
+          {matches.length>0&&<Card>
+            <div style={{fontSize:12,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:10}}>Log</div>
+            {[...matches].reverse().slice(0,8).map((m,i)=>{const et=Object.values(m.errors).reduce((a,b)=>a+b,0);return(
+              <div key={m.id} style={{padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  <span style={{color:C.muted,fontSize:11,minWidth:22}}>P{matches.length-i}</span>
+                  <ResultBadge result={m.result}/><ScoreBadge score={m.score}/>
+                  {!duel&&<>{m.myGoals!=null&&<Tag color={C.green}>⚽{m.myGoals}</Tag>}{m.myAssists!=null&&<Tag color={C.blue}>🎯{m.myAssists}</Tag>}{m.mySaves!=null&&<Tag color={C.teal}>🧤{m.mySaves}</Tag>}</>}
+                  {et>0&&<span style={{color:C.muted,fontSize:11}}>{et}e</span>}
+                </div>
+              </div>
+            );})}
+          </Card>}
+          <SecondaryBtn onClick={()=>setStep("end")} disabled={matches.length===0}>Terminar sesión →</SecondaryBtn>
+        </div>
+      </div>
+    </div>
+  );
+  const mmrDelta=endMMR&&startMMR?Number(endMMR)-Number(startMMR):null;
+  const focusDef=focusErr?errors.find(e=>e.id===focusErr):null;
+  const focusTot=focusErr?(totE[focusErr]||0):null;
+  const focusAvg=focusTot!=null&&matches.length>0?(focusTot/matches.length).toFixed(2):null;
+  const histAvg=focusErr?avgErr(sessions,modeId,focusErr):null;
+  const improved=histAvg!=null&&focusAvg!=null?Number(focusAvg)<histAvg:null;
+  return(
+    <div style={{padding:"32px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
+        <div style={{width:44,height:44,borderRadius:12,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{mode.icon}</div>
+        <div><h1 style={{fontSize:24,fontWeight:700,color:C.text}}>{mode.name}</h1><p style={{fontSize:13,color:C.muted}}>{matches.length} partidas · {wins}W / {matches.length-wins}L</p></div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:20}}>
+        <div>
+          <div className="stat-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:12}}>
+            {[["Partidas",matches.length,C.text],["Victorias",wins,C.green],["Derrotas",matches.length-wins,C.red],["Win%",matches.length>0?Math.round(wins/matches.length*100)+"%":"—",C.blue]].map(([l,v,col])=>(
+              <Card key={l} style={{padding:"14px 16px"}}><StatBlock label={l} value={v} valueColor={col}/></Card>
+            ))}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:`1fr 1fr${!duel?" 1fr 1fr 1fr":""}`,gap:8,marginBottom:16}}>
+            <Card style={{padding:"14px 16px"}}><StatBlock label="GF" value={totalGF} valueColor={C.green}/></Card>
+            <Card style={{padding:"14px 16px"}}><StatBlock label="GC" value={totalGA} valueColor={C.red}/></Card>
+            {!duel&&<><Card style={{padding:"14px 16px"}}><StatBlock label="⚽ Mis goles" value={totalMG??0} valueColor={C.green}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.blue}40`}}><StatBlock label="🎯 Asistencias" value={totalMA??0} valueColor={C.blue}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.teal}40`}}><StatBlock label="🧤 Salvadas" value={totalMS??0} valueColor={C.teal}/></Card></>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+            {errors.map(e=>{const tot=totE[e.id]||0,avg=matches.length>0?(tot/matches.length).toFixed(1):"0",isFocus=focusErr===e.id;return(
+              <Card key={e.id} style={{borderColor:isFocus?mode.color:C.border,padding:"16px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:13,color:isFocus?mode.color:C.sub}}>{e.label}</span>{isFocus&&<Tag color={mode.color}>Foco</Tag>}</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:32,fontWeight:700,color:tot>0?C.text:C.muted}}>{tot}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:4}}>{avg}/p</div>
+              </Card>
+            );})}
+          </div>
+          <Card style={{marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:12}}>Registro de partidas</div>
+            {matches.map((m,i)=>{
+              const et=Object.values(m.errors).reduce((a,b)=>a+b,0);
+              const errLabels=errors.filter(e=>(m.errors[e.id]||0)>0).map(e=>`${e.label} ×${m.errors[e.id]}`);
+              return(
+                <div key={m.id} style={{borderBottom:`1px solid ${C.border}`,padding:"0 4px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",flexWrap:"wrap"}}>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.muted,minWidth:24}}>P{i+1}</span>
+                    <ResultBadge result={m.result}/><ScoreBadge score={m.score}/>
+                    {!duel&&<>{m.myGoals!=null&&<Tag color={C.green}>⚽ {m.myGoals}</Tag>}{m.myAssists!=null&&<Tag color={C.blue}>🎯 {m.myAssists}</Tag>}{m.mySaves!=null&&<Tag color={C.teal}>🧤 {m.mySaves}</Tag>}</>}
+                    {et>0&&<span style={{fontSize:12,color:C.muted,marginLeft:"auto"}}>{et} err</span>}
+                  </div>
+                  {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingBottom:8,paddingLeft:36}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
+                </div>
+              );
+            })}
+          </Card>
+          {focusDef&&<Card style={{borderColor:improved===true?`${C.green}40`:improved===false?`${C.red}40`:C.border}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Error Foco: {focusDef.label}</div>
+            <div style={{display:"flex",gap:32,alignItems:"flex-end",flexWrap:"wrap"}}>
+              <div><div style={{fontSize:11,color:C.muted}}>Esta sesión</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:32,fontWeight:700,color:C.text}}>{focusAvg}/p</div></div>
+              {histAvg!=null&&<><div style={{color:C.border,fontSize:24,paddingBottom:4}}>vs</div><div><div style={{fontSize:11,color:C.muted}}>Histórico</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:32,fontWeight:700,color:C.muted}}>{histAvg.toFixed(2)}/p</div></div><Tag color={improved?C.green:C.red}>{improved?"▼ Mejoró":"▲ A trabajar"}</Tag></>}
+              {histAvg===null&&<span style={{fontSize:12,color:C.muted}}>Primera sesión.</span>}
+            </div>
+          </Card>}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <Card>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:12}}>MMR final</div>
+            <NumInput value={endMMR} onChange={setEndMMR} placeholder={startMMR} large/>
+            {endMMR&&!isNaN(endMMR)&&<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8,marginBottom:12}}><div style={{width:8,height:8,borderRadius:2,background:getRank(Number(endMMR),modeId,config).color}}/><span style={{fontSize:13,color:getRank(Number(endMMR),modeId,config).color,fontWeight:500}}>{getRank(Number(endMMR),modeId,config).name}</span></div>}
+            {mmrDelta!=null&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+              {[["Inicio",startMMR,C.muted],["Final",endMMR,C.text],["Cambio",(mmrDelta>=0?"+":"")+mmrDelta,mmrDelta>=0?C.green:C.red]].map(([l,v,col])=><div key={l}><div style={{fontSize:11,color:C.muted}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:col}}>{v}</div></div>)}
+            </div>}
+          </Card>
+          <PrimaryBtn onClick={saveSession} color={mode.color}>💾 Guardar sesión</PrimaryBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatsPage({sessions,mmrHistory,config,onViewSession}){
+  const [sel,setSel]=useState(MODES[0].id);
+  const mode=MODES.find(m=>m.id===sel),errors=getModeErrors(mode),duel=is1v1(sel);
+  const mSess=sessions.filter(s=>s.modeId===sel),latMMR=getLatestMMR(mmrHistory,sel,mode.initMMR),rank=getRank(latMMR,sel,config),trend=getMMRTrend(mmrHistory,sel);
+  const allM=mSess.flatMap(s=>s.matches);
+  const totGF=allM.reduce((a,m)=>a+(m.score?.us||0),0),totGA=allM.reduce((a,m)=>a+(m.score?.them||0),0);
+  const totMG=!duel?allM.reduce((a,m)=>a+(m.myGoals||0),0):null;
+  const totMA=!duel?allM.reduce((a,m)=>a+(m.myAssists||0),0):null;
+  const totMS=!duel?allM.reduce((a,m)=>a+(m.mySaves||0),0):null;
+  return(
+    <div style={{padding:"32px"}}>
+      <div style={{marginBottom:20}}><h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>Estadísticas</h1><p style={{fontSize:14,color:C.muted}}>Clic en sesión para ver detalle y editar</p></div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:24}}>
+        {MODES.map(m=><button key={m.id} onClick={()=>setSel(m.id)} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${sel===m.id?m.color:C.border}`,background:sel===m.id?`${m.color}20`:"none",color:sel===m.id?C.text:C.muted,fontSize:13,fontWeight:sel===m.id?600:400,flexShrink:0}}>{m.icon} {m.name}</button>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:20}}>
+        <div>
+          <Card style={{marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+              <div><div style={{fontSize:13,color:C.muted,marginBottom:4}}>{mode.name}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:36,fontWeight:700,color:C.text}}>{latMMR}</div><div style={{fontSize:13,color:rank.color,fontWeight:500,marginTop:2}}>{rank.name}</div></div>
+              <div style={{textAlign:"right"}}><div style={{fontSize:11,color:C.muted,marginBottom:4}}>Variación total</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:28,fontWeight:700,color:trend>=0?C.green:C.red}}>{trend>0?"+":""}{trend}</div></div>
+            </div>
+            <Sparkline data={mmrHistory[sel]||[]} color={mode.color} height={60}/>
+          </Card>
+          <div style={{display:"grid",gridTemplateColumns:`1fr 1fr${!duel?" 1fr 1fr 1fr":""}`,gap:8,marginBottom:14}}>
+            <Card style={{padding:"14px 16px"}}><StatBlock label="GF" value={totGF} valueColor={C.green}/></Card>
+            <Card style={{padding:"14px 16px"}}><StatBlock label="GC" value={totGA} valueColor={C.red}/></Card>
+            {!duel&&<><Card style={{padding:"14px 16px"}}><StatBlock label="⚽ Mis goles" value={totMG??0} valueColor={C.green}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.blue}40`}}><StatBlock label="🎯 Asist." value={totMA??0} valueColor={C.blue}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.teal}40`}}><StatBlock label="🧤 Salvadas" value={totMS??0} valueColor={C.teal}/></Card></>}
+          </div>
+          <Card>
+            <div style={{fontSize:12,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:14}}>Sesiones</div>
+            {mSess.length===0?<div style={{fontSize:13,color:C.muted,padding:"16px 0",textAlign:"center"}}>Sin sesiones aún</div>
+              :[...mSess].reverse().map(s=>{
+                const d=s.endMMR&&s.startMMR?s.endMMR-s.startMMR:null,sw=s.matches.filter(isWin).length;
+                const sg=s.matches.reduce((a,m)=>a+(m.score?.us||0),0),sga=s.matches.reduce((a,m)=>a+(m.score?.them||0),0);
+                const smg=!duel?s.matches.reduce((a,m)=>a+(m.myGoals||0),0):null;
+                const sma=!duel?s.matches.reduce((a,m)=>a+(m.myAssists||0),0):null;
+                const sms=!duel?s.matches.reduce((a,m)=>a+(m.mySaves||0),0):null;
+                const focDef=s.focusError?errors.find(e=>e.id===s.focusError):null;
+                return(
+                  <div key={s.id} onClick={()=>onViewSession(s)} style={{padding:"12px 10px",borderBottom:`1px solid ${C.border}`,borderRadius:8,cursor:"pointer",margin:"2px 0"}}
+                    onMouseEnter={e=>e.currentTarget.style.background=C.hover} onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                      <div>
+                        <div style={{fontSize:13,color:C.text,display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                          {s.date}{s.isPlacement&&<Tag color={C.amber}>Posicionamiento</Tag>}{s.time&&s.time!=="Posicionamiento"&&<span style={{fontSize:11,color:C.muted}}>· {s.time}</span>}
+                        </div>
+                        <div style={{fontSize:11,color:C.muted,display:"flex",gap:8,flexWrap:"wrap"}}>
+                          <span>{s.matches.length}p · {sw}W / {s.matches.filter(m=>m.result==="loss").length}L</span>
+                          {focDef&&<span style={{color:mode.color}}>🎯{focDef.label}</span>}
+                          {!duel&&<span>{sg}–{sga}{smg!=null?` ⚽${smg}`:""}{sma!=null?` 🎯${sma}`:""}{sms!=null?` 🧤${sms}`:""}</span>}
+                        </div>
+                      </div>
+                      <div style={{fontFamily:"'DM Mono',monospace",fontSize:15,fontWeight:600,color:d===null?C.muted:d>=0?C.green:C.red}}>{d!==null?(d>=0?"+":"")+d+" MMR":"—"}</div>
+                    </div>
+                  </div>
+                );
+              })
+            }
+          </Card>
+        </div>
+        <div>
+          <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Análisis de errores</div>
+          {mSess.length===0?<Card><div style={{fontSize:13,color:C.muted,textAlign:"center",padding:"40px 0"}}>Juega sesiones para ver el análisis</div></Card>
+            :errors.map(e=>{
+              const av=avgErr(sessions,sel,e.id);if(av===null)return null;
+              const recent=mSess.slice(-3);let rt=0,rc=0;recent.forEach(s=>s.matches.forEach(m=>{rt+=(m.errors[e.id]||0);rc++;}));
+              const ra=rc>0?rt/rc:null,imp=ra!=null&&ra<av,pct=Math.min(100,(av/3)*100);
+              return(
+                <Card key={e.id} style={{marginBottom:10,padding:"14px 16px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <span style={{fontSize:13,color:C.text}}>{e.label}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      {ra!=null&&mSess.length>=3&&<Tag color={imp?C.green:C.red}>{imp?"▼ Mejorando":"▲ A trabajar"}</Tag>}
+                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:mode.color}}>{av.toFixed(2)}</span>
+                    </div>
+                  </div>
+                  <div style={{height:4,background:C.border,borderRadius:2,marginBottom:ra!=null&&mSess.length>=3?8:0}}>
+                    <div style={{height:"100%",width:`${pct}%`,background:pct>66?C.red:pct>33?C.amber:C.green,borderRadius:2}}/>
+                  </div>
+                  {ra!=null&&mSess.length>=3&&<div style={{fontSize:11,color:C.muted}}>Últimas 3: <span style={{color:imp?C.green:C.red,fontWeight:600}}>{ra.toFixed(2)}/p</span> · histórico: {av.toFixed(2)}/p</div>}
+                </Card>
+              );
+            })
+          }
+          {mSess.length>0&&(()=>{const worst=[...errors].map(e=>({...e,av:avgErr(sessions,sel,e.id)||0})).sort((a,b)=>b.av-a.av)[0];return(
+            <Card style={{borderColor:`${mode.color}40`,marginTop:4}}>
+              <div style={{fontSize:12,fontWeight:600,color:mode.color,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>💡 Recomendación</div>
+              <div style={{fontSize:13,color:C.sub,lineHeight:1.6}}>Tu error más frecuente en {mode.name} es <strong style={{color:C.text}}>{worst.label}</strong> ({worst.av.toFixed(2)}/p).</div>
+            </Card>
+          );})()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TournamentPage({sessions,tournaments,config,onSaveTournament}){
+  const [view,setView]=useState("list");
+  const [selMode,setSelMode]=useState(MODES[0].id);
+  const [selRank,setSelRank]=useState(null);
+  const [matches,setMatches]=useState([]);
+  const [currRound,setCurrRound]=useState(TOURNAMENT_ROUNDS[0]);
+  const [currR,setCurrR]=useState(null),[scoreUs,setScoreUs]=useState(""),[scoreThem,setScoreThem]=useState("");
+  const [myGoals,setMyGoals]=useState(""),[myAssists,setMyAssists]=useState(""),[mySaves,setMySaves]=useState("");
+  const [currE,setCurrE]=useState({});
+  const [viewT,setViewT]=useState(null);
+  const mode=MODES.find(m=>m.id===selMode),errors=getModeErrors(mode),duel=is1v1(selMode);
+  const rankTable=getRankTable(config,selMode);
+  const currEtot=Object.values(currE).reduce((a,b)=>a+b,0);
+  const resetMatch=()=>{setCurrR(null);setScoreUs("");setScoreThem("");setMyGoals("");setMyAssists("");setMySaves("");setCurrE({});};
+  const addMatch=()=>{
+    if(!currR)return;
+    const score=scoreUs!==""&&scoreThem!==""?{us:Number(scoreUs),them:Number(scoreThem)}:null;
+    setMatches(p=>[...p,{id:Date.now(),round:currRound,result:currR,errors:{...currE},score,myGoals:!duel&&myGoals!==""?Number(myGoals):null,myAssists:!duel&&myAssists!==""?Number(myAssists):null,mySaves:!duel&&mySaves!==""?Number(mySaves):null}]);
+    resetMatch();
+  };
+  const saveTournament=()=>{
+    if(matches.length===0||!selRank)return;
+    onSaveTournament({id:Date.now(),date:new Date().toLocaleDateString("es-ES"),time:new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),modeId:selMode,modeName:mode.name,rankName:selRank,matches});
+    setMatches([]);setSelRank(null);setSelMode(MODES[0].id);setView("list");resetMatch();
+  };
+  if(viewT){
+    const tm=MODES.find(m=>m.id===viewT.modeId)||{name:viewT.modeName,color:C.orange,icon:"🏆"};
+    const terrors=getModeErrors(tm),tduel=is1v1(viewT.modeId);
+    const trankDef=viewT.rankName?RANK_DEFS.find(r=>r.name===viewT.rankName):null;
+    const tw=viewT.matches.filter(isWin).length,tl=viewT.matches.filter(m=>m.result==="loss").length,td=viewT.matches.filter(m=>m.result==="draw").length;
+    const tgf=viewT.matches.reduce((a,m)=>a+(m.score?.us||0),0),tga=viewT.matches.reduce((a,m)=>a+(m.score?.them||0),0);
+    const tmg=!tduel?viewT.matches.reduce((a,m)=>a+(m.myGoals||0),0):null;
+    const tma=!tduel?viewT.matches.reduce((a,m)=>a+(m.myAssists||0),0):null;
+    const tms=!tduel?viewT.matches.reduce((a,m)=>a+(m.mySaves||0),0):null;
+    const totTE=viewT.matches.reduce((tot,m)=>{terrors.forEach(e=>{tot[e.id]=(tot[e.id]||0)+(m.errors[e.id]||0);});return tot;},{});
+    const byRound=TOURNAMENT_ROUNDS.map(r=>({round:r,matches:viewT.matches.filter(m=>m.round===r)})).filter(r=>r.matches.length>0);
+    return(
+      <div style={{padding:"32px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
+          <GhostBtn onClick={()=>setViewT(null)}>← Volver</GhostBtn>
+          <div style={{width:44,height:44,borderRadius:12,background:`${tm.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{tm.icon}</div>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+              <h1 style={{fontSize:22,fontWeight:700,color:C.text}}>Torneo</h1>
+              {trankDef&&<Tag color={trankDef.color}>{trankDef.name}</Tag>}
+              <Tag color={tm.color}>{tm.name}</Tag>
+            </div>
+            <p style={{fontSize:13,color:C.muted}}>{viewT.date} · {viewT.time}</p>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(auto-fill,minmax(${!tduel?'80px':'100px'},1fr))`,gap:8,marginBottom:20}}>
+          {[["Partidas",viewT.matches.length,C.text],["Victorias",tw,C.green],["Derrotas",tl,C.red],["Empates",td,"#7289da"],["GF–GC",`${tgf}–${tga}`,C.sub],...(!tduel?[["⚽ Goles",tmg??0,C.green],["🎯 Asist.",tma??0,C.blue],["🧤 Salvadas",tms??0,C.teal]]:[])].map(([l,v,col])=>(
+            <Card key={l} style={{padding:"12px 14px"}}><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:.7,marginBottom:4}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{v}</div></Card>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:20}}>
+          <div>
+            {byRound.map(({round,matches:rm})=>(
+              <Card key={round} style={{marginBottom:14}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                  <div style={{width:8,height:8,borderRadius:2,background:C.orange}}/>
+                  <div style={{fontSize:14,fontWeight:700,color:C.text}}>{round}</div>
+                  <span style={{fontSize:11,color:C.muted}}>{rm.length}p</span>
+                  <span style={{marginLeft:"auto",fontSize:12,color:C.green}}>{rm.filter(isWin).length}V</span>
+                  <span style={{fontSize:12,color:C.red}}>{rm.filter(m=>m.result==="loss").length}D</span>
+                </div>
+                {rm.map((m,i)=>{
+                  const et=Object.values(m.errors).reduce((a,b)=>a+b,0);
+                  const errLabels=terrors.filter(e=>(m.errors[e.id]||0)>0).map(e=>`${e.label} ×${m.errors[e.id]}`);
+                  return(
+                    <div key={m.id} style={{borderTop:`1px solid ${C.border}`,padding:"10px 0"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                        <span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted,minWidth:20}}>P{i+1}</span>
+                        <ResultBadge result={m.result}/><ScoreBadge score={m.score}/>
+                        {!tduel&&<>{m.myGoals!=null&&<Tag color={C.green}>⚽ {m.myGoals}</Tag>}{m.myAssists!=null&&<Tag color={C.blue}>🎯 {m.myAssists}</Tag>}{m.mySaves!=null&&<Tag color={C.teal}>🧤 {m.mySaves}</Tag>}</>}
+                        {et>0&&<span style={{fontSize:11,color:C.muted,marginLeft:"auto"}}>{et} err</span>}
+                      </div>
+                      {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingTop:6,paddingLeft:32}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
+                    </div>
+                  );
+                })}
+              </Card>
+            ))}
+          </div>
+          <Card>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Errores del torneo</div>
+            {terrors.map(e=>{const tot=totTE[e.id]||0;return(
+              <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+                <span style={{fontSize:12,color:tot>0?C.text:C.muted}}>{e.label}</span>
+                <div style={{textAlign:"right"}}><div style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:tot>0?C.text:C.muted}}>{tot}</div><div style={{fontSize:10,color:C.muted}}>{viewT.matches.length>0?(tot/viewT.matches.length).toFixed(1):0}/p</div></div>
+              </div>
+            );})}
+          </Card>
+        </div>
+      </div>
+    );
+  }
+  if(view==="new")return(
+    <div style={{padding:"32px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
+        <GhostBtn onClick={()=>{setView("list");setMatches([]);resetMatch();}}>← Cancelar</GhostBtn>
+        <div style={{width:44,height:44,borderRadius:12,background:`${C.orange}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🏆</div>
+        <div style={{flex:1}}><h1 style={{fontSize:22,fontWeight:700,color:C.text}}>Registrar torneo</h1><p style={{fontSize:13,color:C.muted}}>{matches.length} partidas registradas</p></div>
+        <PrimaryBtn onClick={saveTournament} color={C.orange} disabled={matches.length===0||!selRank} style={{width:"auto",padding:"10px 20px"}}>💾 Guardar torneo</PrimaryBtn>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20}}>
+        <div>
+          <Card style={{marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Modo y rango</div>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Modo de juego</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {MODES.map(m=>(
+                  <button key={m.id} onClick={()=>{setSelMode(m.id);setSelRank(null);}}
+                    style={{padding:"8px 12px",borderRadius:8,border:`1.5px solid ${selMode===m.id?m.color:C.border}`,background:selMode===m.id?`${m.color}15`:"none",color:selMode===m.id?C.text:C.muted,fontSize:13,fontWeight:selMode===m.id?700:400}}>
+                    {m.icon} {m.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8}}>
+              Rango del torneo {selRank&&<span style={{color:RANK_DEFS.find(r=>r.name===selRank)?.color,fontWeight:700}}>· {selRank} ✓</span>}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+              {rankTable.map(r=>(
+                <button key={r.name} onClick={()=>setSelRank(r.name)}
+                  style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:8,border:`1.5px solid ${selRank===r.name?r.color:C.border}`,background:selRank===r.name?`${r.color}15`:"none",cursor:"pointer"}}>
+                  <div style={{width:8,height:8,borderRadius:2,background:r.color,flexShrink:0}}/>
+                  <span style={{fontSize:12,color:selRank===r.name?r.color:C.muted,fontWeight:selRank===r.name?700:400}}>{r.name}</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+          <Card style={{marginBottom:16}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:16}}>Agregar partida</div>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Ronda</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {TOURNAMENT_ROUNDS.map(r=>(
+                  <button key={r} onClick={()=>setCurrRound(r)}
+                    style={{padding:"8px 14px",borderRadius:8,border:`1.5px solid ${currRound===r?C.orange:C.border}`,background:currRound===r?`${C.orange}15`:"none",color:currRound===r?C.orange:C.muted,fontSize:12,fontWeight:currRound===r?700:400}}>
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Resultado</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                {[["win","Victoria",C.green],["mvp","MVP 👑",C.amber],["loss","Derrota",C.red],["draw","Empate","#7289da"]].map(([v,l,col])=>(
+                  <button key={v} onClick={()=>setCurrR(currR===v?null:v)} style={{padding:"10px 6px",borderRadius:8,border:`1.5px solid ${currR===v?col:C.border}`,background:currR===v?`${col}15`:"none",color:currR===v?col:C.sub,fontSize:13,fontWeight:currR===v?700:400}}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Estadísticas (opcional)</div>
+              <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
+            </div>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Errores — total: {currEtot}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {errors.map(e=>{const cnt=currE[e.id]||0;return(
+                  <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:C.surface,borderRadius:8,border:`1px solid ${cnt>0?`${C.orange}50`:C.border}`}}>
+                    <span style={{fontSize:11,color:C.muted}}>{e.label}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <button onClick={()=>setCurrE(p=>({...p,[e.id]:Math.max(0,(p[e.id]||0)-1)}))} disabled={cnt===0} style={{width:26,height:26,borderRadius:6,border:`1px solid ${C.border}`,background:C.card,color:cnt>0?C.text:C.muted,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:16,fontWeight:700,color:cnt>0?C.text:C.muted,minWidth:16,textAlign:"center"}}>{cnt}</span>
+                      <button onClick={()=>setCurrE(p=>({...p,[e.id]:(p[e.id]||0)+1}))} style={{width:26,height:26,borderRadius:6,border:`1px solid ${C.orange}40`,background:`${C.orange}15`,color:C.orange,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                    </div>
+                  </div>
+                );})}
+              </div>
+            </div>
+            <PrimaryBtn onClick={addMatch} color={C.orange} disabled={!currR}>+ Agregar partida {matches.length+1} ({currRound})</PrimaryBtn>
+          </Card>
+        </div>
+        <Card>
+          <div style={{fontSize:12,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:14}}>Partidas agregadas</div>
+          {matches.length===0?<div style={{fontSize:13,color:C.muted,textAlign:"center",padding:"32px 0"}}>Agrega partidas aquí</div>
+            :[...matches].reverse().map(m=>{
+              const et=Object.values(m.errors).reduce((a,b)=>a+b,0);
+              return(
+                <div key={m.id} style={{padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <span style={{fontSize:11,color:C.orange,fontWeight:600}}>{m.round}</span>
+                    <ResultBadge result={m.result}/>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <ScoreBadge score={m.score}/>
+                    {!duel&&<>{m.myGoals!=null&&<Tag color={C.green}>⚽{m.myGoals}</Tag>}{m.myAssists!=null&&<Tag color={C.blue}>🎯{m.myAssists}</Tag>}{m.mySaves!=null&&<Tag color={C.teal}>🧤{m.mySaves}</Tag>}</>}
+                    {et>0&&<span style={{fontSize:11,color:C.muted}}>{et}e</span>}
+                  </div>
+                </div>
+              );
+            })
+          }
+        </Card>
+      </div>
+    </div>
+  );
+  const allWins=tournaments.reduce((a,t)=>a+t.matches.filter(isWin).length,0);
+  const allPlayed=tournaments.reduce((a,t)=>a+t.matches.length,0);
+  return(
+    <div style={{padding:"32px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:28}}>
+        <div><h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>Torneos</h1><p style={{fontSize:14,color:C.muted}}>Historial por modo y rango</p></div>
+        <PrimaryBtn onClick={()=>setView("new")} color={C.orange} style={{width:"auto",padding:"12px 24px"}}>🏆 Registrar torneo</PrimaryBtn>
+      </div>
+      {tournaments.length>0&&<div className="stat-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
+        {[["Torneos",tournaments.length,C.orange],["Partidas",allPlayed,C.text],["Victorias",allWins,C.green],["Win rate",allPlayed>0?Math.round(allWins/allPlayed*100)+"%":"—",C.blue]].map(([l,v,col])=>(
+          <Card key={l}><StatBlock label={l} value={v} valueColor={col}/></Card>
+        ))}
+      </div>}
+      {tournaments.length===0
+        ?<Card><div style={{textAlign:"center",padding:"60px 0",color:C.muted}}>
+          <div style={{fontSize:40,marginBottom:16}}>🏆</div>
+          <div style={{fontSize:16,fontWeight:600,color:C.sub,marginBottom:8}}>Sin torneos registrados</div>
+          <div style={{fontSize:13}}>Registra tu primer torneo para ver estadísticas</div>
+        </div></Card>
+        :[...tournaments].reverse().map(t=>{
+          const tm=MODES.find(m=>m.id===t.modeId)||{name:t.modeName,color:C.orange,icon:"🏆"};
+          const trankDef=t.rankName?RANK_DEFS.find(r=>r.name===t.rankName):null;
+          const tw=t.matches.filter(isWin).length,tl=t.matches.filter(m=>m.result==="loss").length;
+          const tgf=t.matches.reduce((a,m)=>a+(m.score?.us||0),0),tga=t.matches.reduce((a,m)=>a+(m.score?.them||0),0);
+          const roundsSeen=[...new Set(t.matches.map(m=>m.round))].filter(r=>TOURNAMENT_ROUNDS.includes(r)).sort((a,b)=>TOURNAMENT_ROUNDS.indexOf(b)-TOURNAMENT_ROUNDS.indexOf(a));
+          const furthestRound=roundsSeen[0]||"—";
+          return(
+            <div key={t.id} onClick={()=>setViewT(t)}
+              style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:"18px 20px",marginBottom:10,cursor:"pointer"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=C.orange;e.currentTarget.style.background=C.hover;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;e.currentTarget.style.background=C.card;}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{width:40,height:40,borderRadius:10,background:`${tm.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{tm.icon}</div>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{fontSize:15,fontWeight:700,color:C.text}}>Torneo</span>
+                      {trankDef&&<Tag color={trankDef.color}>{trankDef.name}</Tag>}
+                      <Tag color={tm.color}>{tm.name}</Tag>
+                    </div>
+                    <div style={{fontSize:12,color:C.muted}}>{t.date} · {t.time}</div>
+                  </div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <Tag color={C.orange}>{furthestRound}</Tag>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>{t.matches.length} partidas</div>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:10,marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+                <Tag color={C.green}>{tw}V</Tag><Tag color={C.red}>{tl}D</Tag>
+                {t.matches.filter(m=>m.result==="draw").length>0&&<Tag color="#7289da">{t.matches.filter(m=>m.result==="draw").length}E</Tag>}
+                <span style={{fontSize:12,color:C.muted,marginLeft:4}}>GF–GC: {tgf}–{tga}</span>
+              </div>
+            </div>
+          );
+        })
+      }
+    </div>
+  );
+}
+
+
+// ─── ONBOARDING WIZARD ───────────────────────────────────────────────────────
+
+const OKEY = 'rlt3f_onboarded';
+function isOnboarded(){ return !!localStorage.getItem(OKEY); }
+function setOnboarded(){ localStorage.setItem(OKEY,'1'); }
+
+function OnboardingWizard({ onComplete }) {
+  const [step, setStep]     = useState(0); // 0=welcome, 1=name, 2=mmr-standard, 3=mmr-special, 4=done
+  const [name, setName]     = useState('');
+  const [mmrs, setMmrs]     = useState(() => {
+    const m = {}; MODES.forEach(mode => { m[mode.id] = ''; }); return m;
+  });
+
+  const setMmr = (id, val) => setMmrs(prev => ({ ...prev, [id]: val }));
+
+  const stdModes = MODES.filter(m => m.group === 'standard');
+  const speModes = MODES.filter(m => m.group === 'special');
+
+  const allStdFilled = stdModes.every(m => mmrs[m.id] !== '' && !isNaN(mmrs[m.id]));
+  const allSpeFilled = speModes.every(m => mmrs[m.id] !== '' && !isNaN(mmrs[m.id]));
+
+  const finish = () => {
+    // Build mmr history from wizard inputs
+    const hist = {};
+    const today = new Date().toLocaleDateString('es-ES');
+    MODES.forEach(mode => {
+      const val = Number(mmrs[mode.id]) || 0;
+      hist[mode.id] = [{ date: today, mmr: val }];
+    });
+    setOnboarded();
+    onComplete({ name, mmrHistory: hist });
+  };
+
+  const steps = ['Bienvenida', 'Tu nombre', 'Modos estándar', 'Modos especiales'];
+
+  return (
+    <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div style={{width:'100%',maxWidth:520}}>
+        {/* Logo */}
+        <div style={{textAlign:'center',marginBottom:32}}>
+          <div style={{fontSize:56,marginBottom:8}}>🚗</div>
+          <div style={{fontSize:22,fontWeight:700,color:C.text}}>RL Tracker</div>
+          <div style={{fontSize:13,color:C.muted,marginTop:4}}>Performance Intelligence</div>
+        </div>
+
+        {/* Progress */}
+        {step > 0 && step < 4 && (
+          <div style={{display:'flex',gap:6,marginBottom:28,justifyContent:'center'}}>
+            {steps.slice(1).map((s,i) => (
+              <div key={s} style={{display:'flex',alignItems:'center',gap:6}}>
+                <div style={{width:24,height:24,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,
+                  background: i+1 < step ? C.green : i+1 === step ? C.blue : C.surface,
+                  color: i+1 <= step ? '#fff' : C.muted,
+                  border: `1px solid ${i+1 < step ? C.green : i+1 === step ? C.blue : C.border}`}}>
+                  {i+1 < step ? '✓' : i+2}
+                </div>
+                {i < 2 && <div style={{width:24,height:1,background: i+1 < step ? C.green : C.border}}/>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* STEP 0 — Welcome */}
+        {step === 0 && (
+          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`,textAlign:'center'}}>
+            <h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:12}}>Bienvenido a RL Tracker</h1>
+            <p style={{fontSize:14,color:C.muted,lineHeight:1.7,marginBottom:28}}>
+              Tu herramienta personal para trackear MMR, analizar errores y mejorar en Rocket League.<br/><br/>
+              Vamos a configurar tu perfil en menos de un minuto.
+            </p>
+            <div style={{background:`${C.blue}10`,border:`1px solid ${C.blue}30`,borderRadius:10,padding:16,marginBottom:28,textAlign:'left'}}>
+              {['Registra sesiones y partidas por modo','Analiza tus errores más frecuentes','Sincroniza en todos tus dispositivos'].map(t => (
+                <div key={t} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                  <span style={{color:C.green,fontSize:14}}>✓</span>
+                  <span style={{fontSize:13,color:C.sub}}>{t}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setStep(1)}
+              style={{width:'100%',padding:'14px',background:C.blue,color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>
+              Empezar configuración →
+            </button>
+          </div>
+        )}
+
+        {/* STEP 1 — Name */}
+        {step === 1 && (
+          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
+            <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>¿Cómo te llaman?</h2>
+            <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Tu gamertag o nombre para personalizar la app.</p>
+            <input value={name} onChange={e => setName(e.target.value)}
+              placeholder="Ej: SebaxGamer11"
+              style={{width:'100%',background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:'14px 16px',color:C.text,fontSize:20,fontWeight:700,fontFamily:"'DM Sans',sans-serif",marginBottom:24,outline:'none'}}
+              onKeyDown={e => e.key === 'Enter' && name.trim() && setStep(2)}
+              autoFocus/>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+              <button onClick={() => setStep(0)}
+                style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>
+                ← Atrás
+              </button>
+              <button onClick={() => setStep(2)} disabled={!name.trim()}
+                style={{padding:'12px',background:name.trim()?C.blue:C.border,color:name.trim()?'#fff':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:name.trim()?'pointer':'default'}}>
+                Continuar →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2 — Standard MMRs */}
+        {step === 2 && (
+          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
+            <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>Modos Estándar</h2>
+            <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Pon tu MMR actual en cada modo. Si no juegas uno, pon 0.</p>
+            {stdModes.map(mode => {
+              const val = mmrs[mode.id];
+              const rank = val !== '' && !isNaN(val) ? getRank(Number(val), mode.id, loadConfig()) : null;
+              return (
+                <div key={mode.id} style={{marginBottom:16}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                    <div style={{width:36,height:36,borderRadius:10,background:`${mode.color}20`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>{mode.icon}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:14,fontWeight:600,color:C.text}}>{mode.name}</div>
+                      {rank && <div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>}
+                    </div>
+                    <input type="number" value={val} onChange={e => setMmr(mode.id, e.target.value)}
+                      placeholder="MMR"
+                      style={{width:100,background:C.card,border:`1px solid ${val?mode.color:C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:18,fontWeight:700,fontFamily:"'DM Mono',monospace",textAlign:'center',outline:'none'}}/>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:8}}>
+              <button onClick={() => setStep(1)}
+                style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>
+                ← Atrás
+              </button>
+              <button onClick={() => setStep(3)} disabled={!allStdFilled}
+                style={{padding:'12px',background:allStdFilled?C.blue:C.border,color:allStdFilled?'#fff':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:allStdFilled?'pointer':'default'}}>
+                Continuar →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3 — Special MMRs */}
+        {step === 3 && (
+          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
+            <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>Modos Especiales</h2>
+            <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Misma idea. Si no juegas alguno, pon 0.</p>
+            {speModes.map(mode => {
+              const val = mmrs[mode.id];
+              const rank = val !== '' && !isNaN(val) ? getRank(Number(val), mode.id, loadConfig()) : null;
+              return (
+                <div key={mode.id} style={{marginBottom:14}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    <div style={{width:34,height:34,borderRadius:10,background:`${mode.color}20`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>{mode.icon}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:600,color:C.text}}>{mode.name}</div>
+                      {rank && <div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>}
+                    </div>
+                    <input type="number" value={val} onChange={e => setMmr(mode.id, e.target.value)}
+                      placeholder="MMR"
+                      style={{width:100,background:C.card,border:`1px solid ${val?mode.color:C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:18,fontWeight:700,fontFamily:"'DM Mono',monospace",textAlign:'center',outline:'none'}}/>
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:16}}>
+              <button onClick={() => setStep(2)}
+                style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>
+                ← Atrás
+              </button>
+              <button onClick={finish} disabled={!allSpeFilled}
+                style={{padding:'12px',background:allSpeFilled?C.green:C.border,color:allSpeFilled?'#000':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:allSpeFilled?'pointer':'default'}}>
+                ✓ Empezar →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function App(){
+  const [onboarded,   setOnboarded]   = useState(isOnboarded);
+  const [playerName,  setPlayerName]  = useState(()=>localStorage.getItem('rlt3f_name')||'');
+  const [page,        setPage]        = useState("home");
+  const [sessions,    setSessions]    = useState(loadSessions);
+  const [mmrHist,     setMmrHist]     = useState(loadMMR);
+  const [tournaments, setTournaments] = useState(loadTournaments);
+  const [config,      setConfig]      = useState(loadConfig);
+  const [viewSess,    setViewSess]    = useState(null);
+  const [mmrModal,    setMmrModal]    = useState(null);
+  const [showCloud,   setShowCloud]   = useState(false);
+  const [showImport,  setShowImport]  = useState(false);
+  const [syncStatus,  setSyncStatus]  = useState('idle');
+  const [lastSync,    setLastSync]    = useState(null);
+  const cloudCfg = getCloudCfg();
+
+  if (!onboarded) return (
+    <OnboardingWizard onComplete={({ name, mmrHistory }) => {
+      localStorage.setItem('rlt3f_name', name);
+      setPlayerName(name);
+      setMmrHist(mmrHistory);
+      saveMMR(mmrHistory);
+      setOnboarded(true);
+      setOnboarded(true);
+    }}/>
+  );
+
+  // Auto-pull on load if cloud configured
+  const doInit = async () => {
+    if (!getCloudCfg()) return;
+    setSyncStatus('syncing');
+    const record = await pullFromCloud();
+    if (record) {
+      const d = unbundleData(record);
+      if (d.sessions    && d.sessions.length    > 0) { setSessions(d.sessions);       saveSessions(d.sessions); }
+      if (d.mmrHistory  && Object.keys(d.mmrHistory).length > 0) { setMmrHist(d.mmrHistory); saveMMR(d.mmrHistory); }
+      if (d.tournaments && d.tournaments.length > 0) { setTournaments(d.tournaments); saveTournaments(d.tournaments); }
+      if (d.config      && Object.keys(d.config).length > 0) { setConfig(d.config);   saveConfig(d.config); }
+      setSyncStatus('ok'); setLastSync(new Date());
+    } else { setSyncStatus('error'); }
+  };
+
+  // Run once on mount
+  useState(() => { doInit(); }, []);
+
+  const doSync = async (s, m, t, cfg) => {
+    if (!getCloudCfg()) { setSyncStatus('no_config'); return; }
+    setSyncStatus('syncing');
+    const result = await pushToCloud(bundleData(s, m, t, cfg));
+    if (result.ok) { setSyncStatus('ok'); setLastSync(new Date()); }
+    else { setSyncStatus('error'); }
+  };
+
+  const handleSave = (session) => {
+    const ns=[session,...sessions]; setSessions(ns); saveSessions(ns);
+    let nh = mmrHist;
+    if(session.endMMR){ nh={...mmrHist}; if(!nh[session.modeId])nh[session.modeId]=[]; nh[session.modeId]=[...nh[session.modeId],{date:session.date,mmr:session.endMMR}]; setMmrHist(nh); saveMMR(nh); }
+    setPage("home");
+    doSync(ns, nh, tournaments, config);
+  };
+  const handleUpdateSession = (updated) => {
+    const ns=sessions.map(s=>s.id===updated.id?updated:s); setSessions(ns); saveSessions(ns); setViewSess(updated);
+    doSync(ns, mmrHist, tournaments, config);
+  };
+  const handleSaveMMR = (mode, mmr) => {
+    const nh={...mmrHist}; if(!nh[mode.id])nh[mode.id]=[];
+    nh[mode.id]=[...nh[mode.id],{date:new Date().toLocaleDateString("es-ES"),mmr}];
+    setMmrHist(nh); saveMMR(nh); setMmrModal(null);
+    doSync(sessions, nh, tournaments, config);
+  };
+  const handleSaveConfig = (cfg) => { setConfig(cfg); saveConfig(cfg); doSync(sessions, mmrHist, tournaments, cfg); };
+  const handleSaveTournament = (t) => { const nt=[t,...tournaments]; setTournaments(nt); saveTournaments(nt); doSync(sessions, mmrHist, nt, config); };
+
+  const handleImport = (bundle) => {
+    if(bundle.sessions)    { setSessions(bundle.sessions);       saveSessions(bundle.sessions); }
+    if(bundle.mmrHistory)  { setMmrHist(bundle.mmrHistory);      saveMMR(bundle.mmrHistory); }
+    if(bundle.tournaments) { setTournaments(bundle.tournaments);  saveTournaments(bundle.tournaments); }
+    if(bundle.config)      { setConfig(bundle.config);           saveConfig(bundle.config); }
+    doSync(bundle.sessions||sessions, bundle.mmrHistory||mmrHist, bundle.tournaments||tournaments, bundle.config||config);
+  };
+
+  const handlePullNow = async () => {
+    setSyncStatus('syncing');
+    const record = await pullFromCloud();
+    if(record) {
+      const d = unbundleData(record);
+      if(d.sessions)    { setSessions(d.sessions);       saveSessions(d.sessions); }
+      if(d.mmrHistory)  { setMmrHist(d.mmrHistory);      saveMMR(d.mmrHistory); }
+      if(d.tournaments) { setTournaments(d.tournaments);  saveTournaments(d.tournaments); }
+      if(d.config)      { setConfig(d.config);           saveConfig(d.config); }
+      setSyncStatus('ok'); setLastSync(new Date());
+    } else { setSyncStatus('error'); }
+  };
+
+  const modeId=page.startsWith("session_")?page.replace("session_",""):null;
+  const syncColor = syncStatus==='ok'?C.green : syncStatus==='syncing'?C.amber : syncStatus==='error'?C.red : C.muted;
+  const syncLabel = syncStatus==='ok'?'✓ Sync' : syncStatus==='syncing'?'⟳ Sync…' : syncStatus==='error'?'✕ Sync' : cloudCfg ? '↕ Sync' : '☁ Config';
+
+  return(
+    <AppShell activePage={page} onNavigate={p=>{setPage(p);setViewSess(null);}} sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config}
+      syncStatus={syncStatus} syncLabel={syncLabel} syncColor={syncColor} lastSync={lastSync}
+      onOpenCloud={()=>setShowCloud(true)} onOpenImport={()=>setShowImport(true)} onPullNow={handlePullNow} cloudCfg={cloudCfg} playerName={playerName}>
+      {mmrModal&&<MMREditModal mode={mmrModal} currentMMR={getLatestMMR(mmrHist,mmrModal.id,mmrModal.initMMR)} config={config} onSave={mmr=>handleSaveMMR(mmrModal,mmr)} onClose={()=>setMmrModal(null)}/>}
+      {showCloud&&<CloudConfigModal onClose={()=>setShowCloud(false)} onSaved={()=>{setSyncStatus('idle');doInit();}}/>}
+      {showImport&&<ImportExportModal onClose={()=>setShowImport(false)} onImport={handleImport}/>}
+      {viewSess
+        ?<SessionDetailPage session={viewSess} config={config} onBack={()=>setViewSess(null)} onUpdateSession={handleUpdateSession}/>
+        :page==="home"        ?<HomePage sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config} onNavigate={setPage} onEditMMR={m=>setMmrModal(m)}/>
+        :page==="stats"       ?<StatsPage sessions={sessions} mmrHistory={mmrHist} config={config} onViewSession={s=>setViewSess(s)}/>
+        :page==="tournaments" ?<TournamentPage sessions={sessions} tournaments={tournaments} config={config} onSaveTournament={handleSaveTournament}/>
+        :page==="settings"    ?<SettingsPage config={config} onSaveConfig={handleSaveConfig}/>
+        :modeId               ?<SessionPage modeId={modeId} sessions={sessions} mmrHistory={mmrHist} config={config} onSave={handleSave}/>
+        :null
+      }
+    </AppShell>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
