@@ -317,23 +317,56 @@ const C={
 };
 
 function Sparkline({data,color,height=40}){
+  const [hovered,setHovered]=React.useState(null);
   if(data.length<2)return <div style={{height,display:"flex",alignItems:"center",color:"#4a4f6a",fontSize:11}}>Sin historial aún</div>;
-  const W=300,H=height,P=4;
+  const W=300,H=height,P=6;
   const vals=data.map(d=>d.mmr),mn=Math.min(...vals)-5,mx=Math.max(...vals)+5,rng=mx-mn||1;
-  const pts=data.map((d,i)=>({x:P+(i/(data.length-1))*(W-P*2),y:H-P-((d.mmr-mn)/rng)*(H-P*2)}));
+  const pts=data.map((d,i)=>({x:P+(i/(data.length-1))*(W-P*2),y:H-P-((d.mmr-mn)/rng)*(H-P*2),mmr:d.mmr,date:d.date}));
   const path=pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const area=path+` L${pts[pts.length-1].x},${H} L${pts[0].x},${H} Z`;
   const gid="gx"+color.replace("#","");
   return(
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height}}>
-      <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor={color} stopOpacity="0.3"/>
-        <stop offset="100%" stopColor={color} stopOpacity="0"/>
-      </linearGradient></defs>
-      <path d={area} fill={`url(#${gid})`}/>
-      <path d={path} stroke={color} strokeWidth="2" fill="none" strokeLinejoin="round"/>
-      {pts.map((p,i)=>i===pts.length-1&&<circle key={i} cx={p.x} cy={p.y} r={3} fill={color}/>)}
-    </svg>
+    <div style={{position:"relative"}}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height,overflow:"visible"}}>
+        <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0"/>
+        </linearGradient></defs>
+        <path d={area} fill={`url(#${gid})`}/>
+        <path d={path} stroke={color} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+        {pts.map((p,i)=>(
+          <g key={i} onMouseEnter={()=>setHovered(i)} onMouseLeave={()=>setHovered(null)} style={{cursor:"pointer"}}>
+            {/* Hit area invisible */}
+            <circle cx={p.x} cy={p.y} r={10} fill="transparent"/>
+            {/* Visible dot */}
+            <circle cx={p.x} cy={p.y} r={hovered===i?5:3}
+              fill={hovered===i?"#fff":color}
+              stroke={color} strokeWidth={hovered===i?2:0}
+              style={{transition:"r .1s"}}/>
+            {/* Tooltip */}
+            {hovered===i&&(()=>{
+              const tipW=80, tipH=36;
+              const tx=Math.min(Math.max(p.x-tipW/2,2),W-tipW-2);
+              const ty=p.y-tipH-8 < 0 ? p.y+10 : p.y-tipH-8;
+              return(
+                <g>
+                  <rect x={tx} y={ty} width={tipW} height={tipH} rx={5}
+                    fill="#1e1f2e" stroke={color} strokeWidth="1" opacity="0.97"/>
+                  <text x={tx+tipW/2} y={ty+14} textAnchor="middle"
+                    fill={color} fontSize="12" fontWeight="700" fontFamily="'DM Mono',monospace">
+                    {p.mmr} MMR
+                  </text>
+                  <text x={tx+tipW/2} y={ty+27} textAnchor="middle"
+                    fill="#72767d" fontSize="9" fontFamily="'DM Sans',sans-serif">
+                    {p.date}
+                  </text>
+                </g>
+              );
+            })()}
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -1345,7 +1378,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
             setStartMMR(existingDraft.startMMR||String(latMMR));
             setFocusErr(existingDraft.focusErr||null);
             setMatches(existingDraft.matches||[]);
-            setStep("tracking");
+            setStep(existingDraft.matches?.length>0?"tracking":"tracking");
             setShowDraftBanner(false);
           }} style={{padding:"13px",borderRadius:10,border:"none",background:mode.color,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
             ▶ Continuar sesión
@@ -1372,7 +1405,10 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
             <NumInput value={startMMR} onChange={setStartMMR} placeholder="Ej: 740" large/>
             {startMMR&&!isNaN(startMMR)&&<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}><div style={{width:8,height:8,borderRadius:2,background:getRank(Number(startMMR),modeId,config).color}}/><span style={{fontSize:13,color:getRank(Number(startMMR),modeId,config).color,fontWeight:500}}>{getRank(Number(startMMR),modeId,config).name}</span></div>}
           </Card>
-          <PrimaryBtn onClick={()=>setStep("tracking")} color={mode.color} disabled={!startMMR||isNaN(startMMR)}>Empezar sesión →</PrimaryBtn>
+          <PrimaryBtn onClick={()=>{
+            saveDraft(modeId,{step:"tracking",startMMR,focusErr,matches:[]});
+            setStep("tracking");
+          }} color={mode.color} disabled={!startMMR||isNaN(startMMR)}>Empezar sesión →</PrimaryBtn>
         </div>
         <Card>
           <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:4}}>Error Foco <span style={{color:C.muted,fontWeight:400}}>(opcional)</span></div>
@@ -1530,13 +1566,25 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
               </div>
             );})}
           </Card>}
-          <SecondaryBtn onClick={()=>setStep("end")} disabled={matches.length===0}>Terminar sesión →</SecondaryBtn>
+          <div style={{position:"sticky",bottom:0,background:C.bg,paddingTop:10,paddingBottom:10,zIndex:10}}>
+            <SecondaryBtn onClick={()=>setStep("end")} disabled={matches.length===0}>
+              {matches.length===0?"Terminar sesión →":`Terminar sesión (${matches.length}p) →`}
+            </SecondaryBtn>
+          </div>
         </div>
       </div>
     </div>
   );
   const mmrDelta=endMMR&&startMMR?Number(endMMR)-Number(startMMR):null;
   const focusDef=focusErr?errors.find(e=>e.id===focusErr):null;
+  // Previous session comparison
+  const prevSessions=sessions.filter(s=>s.modeId===modeId);
+  const prevSession=prevSessions.length>0?prevSessions[0]:null; // sessions are newest-first
+  const prevComparison=prevSession?errors.map(e=>{
+    const currAvg=matches.length>0?(matches.reduce((a,m)=>a+(m.errors[e.id]||0),0)/matches.length):0;
+    const prevAvg=prevSession.matches.length>0?(prevSession.matches.reduce((a,m)=>a+(m.errors[e.id]||0),0)/prevSession.matches.length):0;
+    return{...e,curr:currAvg,prev:prevAvg,delta:currAvg-prevAvg};
+  }).filter(e=>e.curr>0||e.prev>0):null;
   const focusTot=focusErr?(totE[focusErr]||0):null;
   const focusAvg=focusTot!=null&&matches.length>0?(focusTot/matches.length).toFixed(2):null;
   const histAvg=focusErr?avgErr(sessions,modeId,focusErr):null;
@@ -1633,6 +1681,37 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
               );
             })}
           </Card>
+          {prevSession&&prevComparison&&prevComparison.length>0&&<Card style={{marginBottom:16,borderColor:`${C.blue}30`}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.blue,marginBottom:4}}>📊 vs Sesión anterior</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:14}}>{prevSession.date}{prevSession.time&&prevSession.time!=="Posicionamiento"?` · ${prevSession.time}`:""} · {prevSession.matches.length}p</div>
+            {prevComparison.map(e=>{
+              const imp=e.delta<0,same=e.delta===0;
+              const pct=e.prev>0?Math.round(Math.abs(e.delta)/e.prev*100):null;
+              return(
+                <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:12,color:C.sub,flex:1}}>{e.label}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted}}>{e.prev.toFixed(1)}</span>
+                    <span style={{color:C.muted,fontSize:10}}>→</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:same?C.muted:imp?C.green:C.red}}>{e.curr.toFixed(1)}</span>
+                    {!same&&pct!=null&&<span style={{fontSize:10,fontWeight:700,color:imp?C.green:C.red,background:imp?`${C.green}15`:`${C.red}15`,borderRadius:4,padding:"1px 6px"}}>
+                      {imp?"▼":"▲"}{pct}%
+                    </span>}
+                  </div>
+                </div>
+              );
+            })}
+            {(()=>{
+              const improved=prevComparison.filter(e=>e.delta<0).length;
+              const worsened=prevComparison.filter(e=>e.delta>0).length;
+              return improved>0||worsened>0?(
+                <div style={{display:"flex",gap:10,marginTop:10}}>
+                  {improved>0&&<span style={{fontSize:11,color:C.green,background:`${C.green}10`,borderRadius:6,padding:"3px 10px"}}>▼ {improved} error{improved>1?"es":""} mejorado{improved>1?"s":""}</span>}
+                  {worsened>0&&<span style={{fontSize:11,color:C.red,background:`${C.red}10`,borderRadius:6,padding:"3px 10px"}}>▲ {worsened} error{worsened>1?"es":""} empeorado{worsened>1?"s":""}</span>}
+                </div>
+              ):null;
+            })()}
+          </Card>}
           {focusDef&&<Card style={{borderColor:improved===true?`${C.green}40`:improved===false?`${C.red}40`:C.border}}>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Error Foco: {focusDef.label}</div>
             <div style={{display:"flex",gap:32,alignItems:"flex-end",flexWrap:"wrap"}}>
