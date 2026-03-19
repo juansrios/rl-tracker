@@ -90,6 +90,13 @@ function getRank(mmr, modeId, config) {
   const table = getRankTable(config, modeId);
   return table.find(r => mmr >= r.min) || table[table.length - 1];
 }
+function getNextRank(mmr, modeId, config) {
+  const table = getRankTable(config, modeId);
+  const idx = table.findIndex(r => mmr >= r.min);
+  if(idx <= 0) return null; // already SSL or not found
+  const next = table[idx - 1];
+  return { ...next, gap: next.min - mmr };
+}
 
 const MODES = [
   {id:"3v3",        name:"3v3 Estándar",  icon:"⚽", color:"#5865F2", group:"standard", initMMR:0 },
@@ -122,17 +129,152 @@ const SPE_SPECIFIC = {
   snowday:   [{id:"puck",    label:"Perdió Control del Puck"}],
   dropshot:  [{id:"panel",   label:"Falló el Panel Objetivo"}],
 };
-function getModeErrors(mode){ return mode.group==="standard"?STD_ERRORS:[...SPE_GENERIC,...(SPE_SPECIFIC[mode.id]||[])]; }
+function getModeErrors(mode,custom={}){
+  const base=mode.group==="standard"?STD_ERRORS:[...SPE_GENERIC,...(SPE_SPECIFIC[mode.id]||[])];
+  const modeCustom=custom[mode.id]||{};
+  // Apply edits to predefined
+  const edited=base.map(e=>{const ov=modeCustom.errorOverrides?.[e.id];return ov?{...e,label:ov}:e;}).filter(e=>!(modeCustom.errorDeleted||[]).includes(e.id));
+  // Add custom extras
+  return [...edited,...(modeCustom.errors||[])];
+}
+
+// ─── ACIERTOS ─────────────────────────────────────────────────────────────────
+const STD_HITS = [
+  {id:"rot_bien",   label:"Buena Rotación"},
+  {id:"aerial_ok",  label:"Aerial Exitoso"},
+  {id:"save_clave", label:"Salvada Clave"},
+  {id:"kickoff_ok", label:"Kickoff Ganado"},
+  {id:"pase_clave", label:"Pase Clave"},
+  {id:"boost_ok",   label:"Boost Eficiente"},
+];
+const SPE_HITS_GENERIC = [
+  {id:"pos_ok",    label:"Buen Posicionamiento"},
+  {id:"remate_ok", label:"Remate Exitoso"},
+  {id:"ff_ok",     label:"50/50 Ganado"},
+];
+const SPE_HITS_SPECIFIC = {
+  heatseeker:[{id:"def_ok",    label:"Defensa Perfecta"}],
+  rumble:    [{id:"power_ok",  label:"Power-Up Aprovechado"}],
+  hoops:     [{id:"aro_ok",    label:"Remate al Aro Exitoso"}],
+  snowday:   [{id:"puck_ok",   label:"Control del Puck"}],
+  dropshot:  [{id:"panel_ok",  label:"Panel Destruido"}],
+};
+function getModeHits(mode,custom={}){
+  const base=mode.group==="standard"?STD_HITS:[...SPE_HITS_GENERIC,...(SPE_HITS_SPECIFIC[mode.id]||[])];
+  const modeCustom=custom[mode.id]||{};
+  const edited=base.map(h=>{const ov=modeCustom.hitOverrides?.[h.id];return ov?{...h,label:ov}:h;}).filter(h=>!(modeCustom.hitDeleted||[]).includes(h.id));
+  return [...edited,...(modeCustom.hits||[])];
+}
+
+// ─── AI KEY ───────────────────────────────────────────────────────────────────
+const AIKEY = 'rlt3f_aikey';
+function getAIKey(){ try{ return localStorage.getItem(AIKEY)||''; }catch{ return ''; } }
+function setAIKey(k){ localStorage.setItem(AIKEY, k); }
+
+async function generateSummary(prompt){
+  const key = getAIKey();
+  if(!key) return '__NO_KEY__';
+  try{
+    const res = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({
+        model:'claude-haiku-4-5-20251001',
+        max_tokens:300,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      return '__ERROR__: '+(err?.error?.message||res.status);
+    }
+    const data = await res.json();
+    return data.content?.[0]?.text || null;
+  }catch(e){ return '__ERROR__: '+e.message; }
+}
+
+async function generateMatchSummary(match, mode, errors, hits){
+  const errList = errors.filter(e=>(match.errors[e.id]||0)>0).map(e=>`${e.label}(×${match.errors[e.id]})`).join(', ')||'ninguno';
+  const hitList = hits.filter(h=>(match.hits?.[h.id]||0)>0).map(h=>`${h.label}(×${match.hits[h.id]})`).join(', ')||'ninguno';
+  const customHit = match.customHit?.label ? `${match.customHit.label}(×${match.customHit.count||0})` : '';
+  const mec = match.mecanica?.label ? `${match.mecanica.label}: ${match.mecanica.logradas||0}/${match.mecanica.intentos||0} veces` : 'ninguna';
+  const res = match.result==='win'?'Victoria':match.result==='mvp'?'MVP':match.result==='loss'?'Derrota':'Empate';
+  const score = match.score?`${match.score.us}-${match.score.them}`:'sin marcador';
+  const prompt = `Eres un coach de Rocket League. Resume esta partida en 3 frases cortas en español, siendo directo y constructivo. 
+Modo: ${mode.name} | Resultado: ${res} ${score}
+Errores: ${errList}
+Aciertos: ${hitList}${customHit?' + '+customHit:''}
+Mecánica trabajada: ${mec}
+Formato: 1 frase sobre lo positivo, 1 sobre lo negativo, 1 recomendación concreta. Sin emojis.`;
+  return generateSummary(prompt);
+}
+
+async function generateBatchSummaries(sessions, onProgress){
+  const results = [];
+  for(let i=0; i<sessions.length; i++){
+    const s = sessions[i];
+    if(s.sessionSummary && !s.sessionSummary.startsWith('__')) { results.push(s); onProgress(i+1, sessions.length); continue; }
+    const mode = MODES.find(m=>m.id===s.modeId)||{name:s.modeName,group:'standard'};
+    const errors = getModeErrors(mode,{});
+    const hits = getModeHits(mode,{});
+    // Generate per-match summaries
+    const updatedMatches = [];
+    for(const m of s.matches){
+      if(m.summary && !m.summary.startsWith('__')){ updatedMatches.push(m); continue; }
+      const sum = await generateMatchSummary(m, mode, errors, hits);
+      updatedMatches.push({...m, summary: sum||null});
+    }
+    // Generate session summary
+    const sessionSum = await generateSessionSummary(updatedMatches, mode, errors, hits);
+    results.push({...s, matches: updatedMatches, sessionSummary: sessionSum||null});
+    onProgress(i+1, sessions.length);
+    // Small delay to avoid rate limiting
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return results;
+}
+
+async function generateSessionSummary(matches, mode, errors, hits){
+  const totErr={}, totHit={};
+  errors.forEach(e=>{ totErr[e.label]=matches.reduce((a,m)=>a+(m.errors?.[e.id]||0),0); });
+  hits.forEach(h=>{ totHit[h.label]=matches.reduce((a,m)=>a+(m.hits?.[h.id]||0),0); });
+  const wins=matches.filter(m=>m.result==='win'||m.result==='mvp').length;
+  const topErr=Object.entries(totErr).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([l,v])=>`${l}(${v})`).join(', ')||'ninguno';
+  const topHit=Object.entries(totHit).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([l,v])=>`${l}(${v})`).join(', ')||'ninguno';
+  const mecList=[...new Set(matches.filter(m=>m.mecanica?.label).map(m=>`${m.mecanica.label}: ${m.mecanica.logradas||0}/${m.mecanica.intentos||0}`))].join(', ')||'ninguna';
+  const prompt = `Eres un coach de Rocket League. Resume esta sesión en 4 frases en español, siendo directo y motivador.
+Modo: ${mode.name} | ${matches.length} partidas | ${wins}V/${matches.length-wins}L
+Errores más frecuentes: ${topErr}
+Aciertos más repetidos: ${topHit}
+Mecánicas trabajadas: ${mecList}
+Formato: 1 frase sobre el rendimiento general, 1 sobre el mayor logro, 1 sobre el mayor error, 1 recomendación para la próxima sesión. Sin emojis.`;
+  return generateSummary(prompt);
+}
 function is1v1(id){ return id==="1v1"; }
 
 const TOURNAMENT_ROUNDS = ["Fase de Grupos","Ronda de 16","Cuartos de Final","Semifinal","Final","Gran Final"];
 
-const SKEY="rlt3f_s", MKEY="rlt3f_m", TKEY="rlt3f_t", CKEY="rlt3f_cfg";
+const SKEY="rlt3f_s", MKEY="rlt3f_m", TKEY="rlt3f_t", CKEY="rlt3f_cfg", XKEY="rlt3f_custom", MECKEY="rlt3f_mec";
+function draftKey(modeId){ return 'rlt3f_draft_'+modeId; }
+function saveDraft(modeId, data){ try{ localStorage.setItem(draftKey(modeId), JSON.stringify(data)); }catch{} }
+function loadDraft(modeId){ try{ const s=localStorage.getItem(draftKey(modeId)); return s?JSON.parse(s):null; }catch{ return null; } }
+function clearDraft(modeId){ try{ localStorage.removeItem(draftKey(modeId)); }catch{} }
 const today=new Date().toLocaleDateString("es-ES");
 
 const PLACEMENT_SESSIONS=[];
 
 function loadSessions(){ try{const s=localStorage.getItem(SKEY);if(s)return JSON.parse(s);}catch{}return []; }
+
+function loadCustomItems(){
+  try{const s=localStorage.getItem(XKEY);if(s)return JSON.parse(s);}catch{}
+  const d={};MODES.forEach(m=>{d[m.id]={errors:[],hits:[]};});return d;
+}
+function saveCustomItems(x){ localStorage.setItem(XKEY,JSON.stringify(x)); }
+function loadMechanics(){
+  try{const s=localStorage.getItem(MECKEY);if(s)return JSON.parse(s);}catch{}
+  const d={};MODES.forEach(m=>{d[m.id]=[];});return d;
+}
+function saveMechanics(m){ localStorage.setItem(MECKEY,JSON.stringify(m)); }
 function saveSessions(s){ localStorage.setItem(SKEY,JSON.stringify(s)); }
 function loadMMR(){
   try{const s=localStorage.getItem(MKEY);if(s)return JSON.parse(s);}catch{}
@@ -159,23 +301,56 @@ const C={
 };
 
 function Sparkline({data,color,height=40}){
-  if(data.length<2)return <div style={{height,display:"flex",alignItems:"center",color:"#4a4f6a",fontSize:11}}>Sin historial aún</div>;
-  const W=300,H=height,P=4;
+  const [hovered,setHovered]=React.useState(null);
+  if(data.length<2)return(<div style={{height,display:"flex",alignItems:"center",color:"#4a4f6a",fontSize:11}}>Sin historial aún</div>);
+  const W=300,H=height,P=6;
   const vals=data.map(d=>d.mmr),mn=Math.min(...vals)-5,mx=Math.max(...vals)+5,rng=mx-mn||1;
-  const pts=data.map((d,i)=>({x:P+(i/(data.length-1))*(W-P*2),y:H-P-((d.mmr-mn)/rng)*(H-P*2)}));
+  const pts=data.map((d,i)=>({x:P+(i/(data.length-1))*(W-P*2),y:H-P-((d.mmr-mn)/rng)*(H-P*2),mmr:d.mmr,date:d.date}));
   const path=pts.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const area=path+` L${pts[pts.length-1].x},${H} L${pts[0].x},${H} Z`;
   const gid="gx"+color.replace("#","");
   return(
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height}}>
-      <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor={color} stopOpacity="0.3"/>
-        <stop offset="100%" stopColor={color} stopOpacity="0"/>
-      </linearGradient></defs>
-      <path d={area} fill={`url(#${gid})`}/>
-      <path d={path} stroke={color} strokeWidth="2" fill="none" strokeLinejoin="round"/>
-      {pts.map((p,i)=>i===pts.length-1&&<circle key={i} cx={p.x} cy={p.y} r={3} fill={color}/>)}
-    </svg>
+    <div style={{position:"relative"}}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height,overflow:"visible"}}>
+        <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0"/>
+        </linearGradient></defs>
+        <path d={area} fill={`url(#${gid})`}/>
+        <path d={path} stroke={color} strokeWidth="2" fill="none" strokeLinejoin="round"/>
+        {pts.map((p,i)=>(
+          <g key={i} onMouseEnter={()=>setHovered(i)} onMouseLeave={()=>setHovered(null)} style={{cursor:"pointer"}}>
+            {/* Hit area invisible */}
+            <circle cx={p.x} cy={p.y} r={10} fill="transparent"/>
+            {/* Visible dot */}
+            <circle cx={p.x} cy={p.y} r={hovered===i?5:3}
+              fill={hovered===i?"#fff":color}
+              stroke={color} strokeWidth={hovered===i?2:0}
+              style={{transition:"r .1s"}}/>
+            {/* Tooltip */}
+            {hovered===i&&(()=>{
+              const tipW=80, tipH=36;
+              const tx=Math.min(Math.max(p.x-tipW/2,2),W-tipW-2);
+              const ty=p.y-tipH-8 < 0 ? p.y+10 : p.y-tipH-8;
+              return(
+                <g>
+                  <rect x={tx} y={ty} width={tipW} height={tipH} rx={5}
+                    fill="#1e1f2e" stroke={color} strokeWidth="1" opacity="0.97"/>
+                  <text x={tx+tipW/2} y={ty+14} textAnchor="middle"
+                    fill={color} fontSize="12" fontWeight="700" fontFamily="'DM Mono',monospace">
+                    {p.mmr} MMR
+                  </text>
+                  <text x={tx+tipW/2} y={ty+27} textAnchor="middle"
+                    fill="#72767d" fontSize="9" fontFamily="'DM Sans',sans-serif">
+                    {p.date}
+                  </text>
+                </g>
+              );
+            })()}
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -272,10 +447,18 @@ const TIERS=[
   {label:"Bronze",                      range:[19,21],borderColor:"#CD7F32"},
 ];
 
-function SettingsPage({config,onSaveConfig}){
+function SettingsPage({config,onSaveConfig,custom={},onSaveCustom,mechanics={},onSaveMechanics,sessions=[],onUpdateSessions}){
+  const [activeTab,setActiveTab]=useState("rangos");
   const [draft,setDraft]=useState(()=>JSON.parse(JSON.stringify(config)));
   const [selMode,setSelMode]=useState(MODES[0].id);
   const [saved,setSaved]=useState(false);
+  // Custom items state
+  const [draftCustom,setDraftCustom]=useState(()=>JSON.parse(JSON.stringify(custom)));
+  const [customSaved,setCustomSaved]=useState(false);
+  // Mechanics state
+  const [draftMec,setDraftMec]=useState(()=>JSON.parse(JSON.stringify(mechanics)));
+  const [mecSaved,setMecSaved]=useState(false);
+  const [newMecName,setNewMecName]=useState("");
   const mode=MODES.find(m=>m.id===selMode);
   const setVal=(modeId,rankIdx,val)=>{
     setDraft(prev=>{const next={...prev,[modeId]:[...(prev[modeId]||DEFAULT_MODE_RANKS[modeId])]};next[modeId][rankIdx]=val===""?0:Number(val);return next;});
@@ -284,12 +467,27 @@ function SettingsPage({config,onSaveConfig}){
   const resetMode=()=>{ setDraft(prev=>({...prev,[selMode]:[...DEFAULT_MODE_RANKS[selMode]]})); setSaved(false); };
   const save=()=>{ onSaveConfig(draft); setSaved(true); setTimeout(()=>setSaved(false),2000); };
   const currentMins=draft[selMode]||DEFAULT_MODE_RANKS[selMode];
+  const getModeCustom=()=>draftCustom[selMode]||{errors:[],hits:[],errorOverrides:{},hitOverrides:{},errorDeleted:[],hitDeleted:[]};
+  const setModeCustom=(upd)=>setDraftCustom(prev=>({...prev,[selMode]:{...getModeCustom(),...upd}}));
+
   return(
     <div style={{padding:"32px"}}>
-      <div style={{marginBottom:28}}>
-        <h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>⚙️ Configuración de rangos</h1>
-        <p style={{fontSize:14,color:C.muted}}>MMR mínimo por división por playlist. Cada modo es independiente.</p>
+      <div style={{marginBottom:20}}>
+        <h1 style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:4}}>⚙️ Configuración</h1>
+        <p style={{fontSize:14,color:C.muted}}>Personaliza rangos, errores, aciertos y mecánicas por modo.</p>
       </div>
+      {/* Tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${C.border}`,paddingBottom:0}}>
+        {[["rangos","📊 Rangos MMR"],["items","✓ Errores & Aciertos"],["mecanicas","🎯 Mecánicas"],["ia","🤖 IA"]].map(([id,label])=>(
+          <button key={id} onClick={()=>setActiveTab(id)}
+            style={{padding:"10px 18px",borderRadius:"8px 8px 0 0",border:`1px solid ${activeTab===id?C.border:"transparent"}`,borderBottom:activeTab===id?`2px solid ${C.blue}`:"1px solid transparent",background:activeTab===id?C.card:"none",color:activeTab===id?C.text:C.muted,fontSize:13,fontWeight:activeTab===id?700:400,cursor:"pointer",marginBottom:-1}}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* TAB: Rangos */}
+      {activeTab==="rangos"&&<>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:24}}>
         {MODES.map(m=>(
           <button key={m.id} onClick={()=>setSelMode(m.id)}
@@ -349,6 +547,216 @@ function SettingsPage({config,onSaveConfig}){
           <div style={{fontSize:12,color:C.muted,lineHeight:1.6,textAlign:"center"}}>Los cambios se aplican en toda la app de inmediato.</div>
         </div>
       </div>
+      </>}
+
+      {/* TAB: Errores & Aciertos */}
+      {activeTab==="items"&&<>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20}}>
+          {MODES.map(m=>(
+            <button key={m.id} onClick={()=>setSelMode(m.id)}
+              style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${selMode===m.id?m.color:C.border}`,background:selMode===m.id?`${m.color}20`:"none",color:selMode===m.id?C.text:C.muted,fontSize:13,fontWeight:selMode===m.id?600:400}}>
+              {m.icon} {m.name}
+            </button>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+          {/* ERRORS */}
+          {(()=>{
+            const mode=MODES.find(m=>m.id===selMode);
+            const mc=getModeCustom();
+            const baseErrors=mode.group==="standard"?STD_ERRORS:[...SPE_GENERIC,...(SPE_SPECIFIC[mode.id]||[])];
+            const baseHits=mode.group==="standard"?STD_HITS:[...SPE_HITS_GENERIC,...(SPE_HITS_SPECIFIC[mode.id]||[])];
+            return(<>
+              <Card>
+                <div style={{fontSize:14,fontWeight:700,color:C.red,marginBottom:14}}>✗ Errores</div>
+                {/* Predefined */}
+                {baseErrors.map(e=>{
+                  const isDeleted=(mc.errorDeleted||[]).includes(e.id);
+                  const overrideLabel=mc.errorOverrides?.[e.id]||e.label;
+                  return(
+                    <div key={e.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,opacity:isDeleted?.4:1}}>
+                      <input value={overrideLabel} disabled={isDeleted}
+                        onChange={ev=>setModeCustom({errorOverrides:{...(mc.errorOverrides||{}),[e.id]:ev.target.value}})}
+                        style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 10px",color:isDeleted?C.muted:C.text,fontSize:13,outline:"none"}}/>
+                      <button onClick={()=>{
+                        const del=mc.errorDeleted||[];
+                        setModeCustom({errorDeleted:isDeleted?del.filter(x=>x!==e.id):[...del,e.id]});
+                      }} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:"none",color:isDeleted?C.green:C.red,fontSize:14,cursor:"pointer",flexShrink:0}}>
+                        {isDeleted?"↩":"✕"}
+                      </button>
+                    </div>
+                  );
+                })}
+                {/* Custom extras */}
+                {(mc.errors||[]).map((e,i)=>(
+                  <div key={e.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                    <input value={e.label} onChange={ev=>{const errs=[...(mc.errors||[])];errs[i]={...errs[i],label:ev.target.value};setModeCustom({errors:errs});}}
+                      style={{flex:1,background:`${C.red}08`,border:`1px solid ${C.red}30`,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:13,outline:"none"}}/>
+                    <button onClick={()=>setModeCustom({errors:(mc.errors||[]).filter((_,j)=>j!==i)})}
+                      style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:"none",color:C.red,fontSize:14,cursor:"pointer",flexShrink:0}}>✕</button>
+                  </div>
+                ))}
+                <button onClick={()=>setModeCustom({errors:[...(mc.errors||[]),{id:`ce_${Date.now()}`,label:"Nuevo error"}]})}
+                  style={{width:"100%",padding:"8px",borderRadius:8,border:`1px dashed ${C.red}40`,background:"none",color:C.red,fontSize:12,cursor:"pointer",marginTop:4}}>
+                  + Añadir error
+                </button>
+              </Card>
+              <Card>
+                <div style={{fontSize:14,fontWeight:700,color:C.green,marginBottom:14}}>✓ Aciertos</div>
+                {baseHits.map(h=>{
+                  const isDeleted=(mc.hitDeleted||[]).includes(h.id);
+                  const overrideLabel=mc.hitOverrides?.[h.id]||h.label;
+                  return(
+                    <div key={h.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,opacity:isDeleted?.4:1}}>
+                      <input value={overrideLabel} disabled={isDeleted}
+                        onChange={ev=>setModeCustom({hitOverrides:{...(mc.hitOverrides||{}),[h.id]:ev.target.value}})}
+                        style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:6,padding:"6px 10px",color:isDeleted?C.muted:C.text,fontSize:13,outline:"none"}}/>
+                      <button onClick={()=>{
+                        const del=mc.hitDeleted||[];
+                        setModeCustom({hitDeleted:isDeleted?del.filter(x=>x!==h.id):[...del,h.id]});
+                      }} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:"none",color:isDeleted?C.green:C.red,fontSize:14,cursor:"pointer",flexShrink:0}}>
+                        {isDeleted?"↩":"✕"}
+                      </button>
+                    </div>
+                  );
+                })}
+                {(mc.hits||[]).map((h,i)=>(
+                  <div key={h.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                    <input value={h.label} onChange={ev=>{const hs=[...(mc.hits||[])];hs[i]={...hs[i],label:ev.target.value};setModeCustom({hits:hs});}}
+                      style={{flex:1,background:`${C.green}08`,border:`1px solid ${C.green}30`,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:13,outline:"none"}}/>
+                    <button onClick={()=>setModeCustom({hits:(mc.hits||[]).filter((_,j)=>j!==i)})}
+                      style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:"none",color:C.red,fontSize:14,cursor:"pointer",flexShrink:0}}>✕</button>
+                  </div>
+                ))}
+                <button onClick={()=>setModeCustom({hits:[...(mc.hits||[]),{id:`ch_${Date.now()}`,label:"Nuevo acierto"}]})}
+                  style={{width:"100%",padding:"8px",borderRadius:8,border:`1px dashed ${C.green}40`,background:"none",color:C.green,fontSize:12,cursor:"pointer",marginTop:4}}>
+                  + Añadir acierto
+                </button>
+              </Card>
+            </>);
+          })()}
+        </div>
+        <div style={{marginTop:16}}>
+          <PrimaryBtn onClick={()=>{onSaveCustom&&onSaveCustom(draftCustom);setCustomSaved(true);setTimeout(()=>setCustomSaved(false),2000);}} color={customSaved?C.green:C.blue}>
+            {customSaved?"✓ Guardado":"💾 Guardar errores & aciertos"}
+          </PrimaryBtn>
+        </div>
+      </>}
+
+      {/* TAB: Mecánicas */}
+      {activeTab==="mecanicas"&&<>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:20}}>
+          {MODES.map(m=>(
+            <button key={m.id} onClick={()=>setSelMode(m.id)}
+              style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${selMode===m.id?m.color:C.border}`,background:selMode===m.id?`${m.color}20`:"none",color:selMode===m.id?C.text:C.muted,fontSize:13,fontWeight:selMode===m.id?600:400}}>
+              {m.icon} {m.name}
+            </button>
+          ))}
+        </div>
+        <Card style={{maxWidth:500}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.blue,marginBottom:6}}>Mecánicas guardadas — {MODES.find(m=>m.id===selMode)?.name}</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:16}}>Aparecen como chips de selección rápida al trackear una sesión.</div>
+          {(draftMec[selMode]||[]).map((m,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <input value={m} onChange={ev=>{const arr=[...(draftMec[selMode]||[])];arr[i]=ev.target.value;setDraftMec(prev=>({...prev,[selMode]:arr}));}}
+                style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+              <button onClick={()=>setDraftMec(prev=>({...prev,[selMode]:(prev[selMode]||[]).filter((_,j)=>j!==i)}))}
+                style={{width:30,height:30,borderRadius:6,border:`1px solid ${C.border}`,background:"none",color:C.red,fontSize:14,cursor:"pointer",flexShrink:0}}>✕</button>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:8,marginTop:8}}>
+            <input value={newMecName} onChange={e=>setNewMecName(e.target.value)} placeholder="Ej: Musty flick, Flip reset..."
+              onKeyDown={e=>{if(e.key==="Enter"&&newMecName.trim()){setDraftMec(prev=>({...prev,[selMode]:[...(prev[selMode]||[]),newMecName.trim()]}));setNewMecName("");}}}
+              style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+            <button onClick={()=>{if(newMecName.trim()){setDraftMec(prev=>({...prev,[selMode]:[...(prev[selMode]||[]),newMecName.trim()]}));setNewMecName("");}}}
+              style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${C.blue}`,background:`${C.blue}20`,color:C.blue,fontSize:13,cursor:"pointer",fontWeight:600}}>+</button>
+          </div>
+          <div style={{marginTop:16}}>
+            <PrimaryBtn onClick={()=>{onSaveMechanics&&onSaveMechanics(draftMec);setMecSaved(true);setTimeout(()=>setMecSaved(false),2000);}} color={mecSaved?C.green:C.blue}>
+              {mecSaved?"✓ Guardado":"💾 Guardar mecánicas"}
+            </PrimaryBtn>
+          </div>
+        </Card>
+      </>}
+
+      {/* TAB: IA */}
+      {activeTab==="ia"&&<IaTab sessions={sessions} onUpdateSessions={onUpdateSessions}/>}
+
+    </div>
+  );
+}
+
+function IaTab({sessions=[], onUpdateSessions}){
+  const [running,  setRunning]  = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const [total,    setTotal]    = React.useState(0);
+  const [done,     setDone]     = React.useState(false);
+  const [errMsg,   setErrMsg]   = React.useState('');
+  const hasKey = !!getAIKey();
+  const sessionsWithout = sessions.filter(s=>!s.sessionSummary||s.sessionSummary.startsWith('__')).length;
+
+  const runBatch = async () => {
+    if(!hasKey){ setErrMsg('Sin API Key. Confígurala en ⚙ Config → campo "API Key de Claude".'); return; }
+    setRunning(true); setDone(false); setErrMsg(''); setProgress(0); setTotal(sessions.length);
+    try{
+      const updated = await generateBatchSummaries(sessions, (done,tot)=>{ setProgress(done); setTotal(tot); });
+      onUpdateSessions&&onUpdateSessions(updated);
+      setDone(true);
+    }catch(e){ setErrMsg('Error: '+e.message); }
+    setRunning(false);
+  };
+
+  const pct = total>0?Math.round(progress/total*100):0;
+
+  return(
+    <div style={{maxWidth:540}}>
+      <Card style={{marginBottom:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:6}}>🤖 Resúmenes IA en batch</div>
+        <div style={{fontSize:13,color:C.muted,lineHeight:1.7,marginBottom:20}}>
+          Genera resúmenes con Claude para todas tus sesiones y partidas existentes. Se guardan permanentemente.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:20}}>
+          {[["Total",sessions.length,C.text],["Sin resumen",sessionsWithout,C.amber],["Con resumen",sessions.length-sessionsWithout,C.green]].map(([l,v,col])=>(
+            <div key={l} style={{background:C.surface,borderRadius:8,padding:"12px",border:`1px solid ${C.border}`,textAlign:"center"}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:24,fontWeight:700,color:col}}>{v}</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:4}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        {!hasKey&&<div style={{background:`${C.amber}10`,border:`1px solid ${C.amber}30`,borderRadius:8,padding:"12px",fontSize:12,color:C.amber,marginBottom:16}}>
+          ⚠ Configura tu API Key de Claude primero. Cierra este modal → Sidebar → ⚙ Config → campo "API Key de Claude".
+        </div>}
+        {running&&<div style={{marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginBottom:6}}>
+            <span>Sesión {progress} de {total}...</span>
+            <span style={{color:C.blue,fontWeight:700}}>{pct}%</span>
+          </div>
+          <div style={{height:6,background:C.border,borderRadius:3,marginBottom:6}}>
+            <div style={{height:"100%",width:`${pct}%`,background:C.blue,borderRadius:3,transition:"width .4s"}}/>
+          </div>
+          <div style={{fontSize:11,color:C.muted}}>No cierres esta página mientras se genera...</div>
+        </div>}
+        {done&&!running&&<div style={{background:`${C.green}10`,border:`1px solid ${C.green}30`,borderRadius:8,padding:"12px",fontSize:13,color:C.green,marginBottom:16}}>
+          ✓ Completado. Resúmenes guardados en todas las sesiones — vélos en Estadísticas → detalle de sesión.
+        </div>}
+        {errMsg&&<div style={{background:`${C.red}10`,border:`1px solid ${C.red}30`,borderRadius:8,padding:"12px",fontSize:12,color:C.red,marginBottom:16}}>{errMsg}</div>}
+        <button onClick={runBatch} disabled={running||!hasKey||sessionsWithout===0}
+          style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
+            background:running||!hasKey||sessionsWithout===0?C.border:C.blue,
+            color:running||!hasKey||sessionsWithout===0?C.muted:"#fff",
+            fontSize:14,fontWeight:700,cursor:running||!hasKey||sessionsWithout===0?"default":"pointer"}}>
+          {running?`⟳ Generando... ${progress}/${total}`:sessionsWithout===0?"✓ Todas las sesiones tienen resumen":`🤖 Generar para ${sessionsWithout} sesión${sessionsWithout!==1?"es":""}`}
+        </button>
+      </Card>
+      <Card>
+        <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:10}}>ℹ️ Cómo funciona</div>
+        <div style={{fontSize:12,color:C.muted,lineHeight:1.9}}>
+          • Por cada sesión: resumen completo (4 frases) + resumen por partida (3 frases)<br/>
+          • Las sesiones que ya tienen resumen se saltan automáticamente<br/>
+          • Usa Claude Haiku (rápido y económico)<br/>
+          • Al terminar sincroniza todo con JSONBin automáticamente
+        </div>
+      </Card>
     </div>
   );
 }
@@ -407,6 +815,7 @@ function CloudConfigModal({ onClose, onSaved }) {
   const existing = getCloudCfg() || {};
   const [apiKey, setApiKey] = useState(existing.apiKey || '');
   const [binId,  setBinId]  = useState(existing.binId  || '');
+  const [aiKeyVal, setAiKeyVal] = useState(getAIKey());
   const [status, setStatus] = useState('');
   const [testing, setTesting] = useState(false);
 
@@ -419,6 +828,7 @@ function CloudConfigModal({ onClose, onSaved }) {
     setTesting(false);
     if (res.ok) {
       saveCloudCfg({ apiKey, binId });
+      if(aiKeyVal) setAIKey(aiKeyVal);
       setStatus('✓ Conexión exitosa. Configuración guardada.');
       setTimeout(() => { onSaved({ apiKey, binId }); onClose(); }, 1200);
     } else {
@@ -459,6 +869,13 @@ function CloudConfigModal({ onClose, onSaved }) {
         </div>
 
         {status && <div style={{padding:'10px 12px',borderRadius:8,background:status.startsWith('✓')?`${C.green}15`:`${C.red}15`,color:status.startsWith('✓')?C.green:C.red,fontSize:13,marginBottom:16}}>{status}</div>}
+
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:6}}>🤖 API Key de Claude (para resúmenes IA — opcional)</div>
+          <input value={aiKeyVal} onChange={e=>setAiKeyVal(e.target.value)} placeholder="sk-ant-..."
+            style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:12,width:'100%',fontFamily:'monospace'}}/>
+          <div style={{fontSize:11,color:C.muted,marginTop:4}}>Necesaria para los resúmenes automáticos por partida y sesión. Guárdala solo en este dispositivo.</div>
+        </div>
 
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <button onClick={clear} style={{background:'none',color:C.muted,border:`1px solid ${C.border}`,borderRadius:8,padding:'10px',fontSize:13,cursor:'pointer'}}>Desactivar sync</button>
@@ -549,7 +966,7 @@ function ImportExportModal({ onClose, onImport }) {
   );
 }
 
-function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,playerName}){
+function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,playerName,custom,mechanics,onSaveCustom,onSaveMechanics}){
   const [open,setOpen]=useState(true);
   const [mobile,setMobile]=useState(window.innerWidth<=768);
   React.useEffect(()=>{
@@ -591,7 +1008,7 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
       position:mobile?"fixed":"sticky",top:0,height:"100vh",overflow:"auto",flexShrink:0,zIndex:100,
       transform:mobile&&!open?"translateX(-100%)":"translateX(0)",transition:"transform .2s ease, width .2s ease"}}>
       {!mobile&&<div style={{padding:open?"20px 16px":"12px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:10}}>
-        {open&&<div><div style={{fontSize:16,fontWeight:700,color:C.text}}>🚗 RL Tracker</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>Performance Intelligence</div></div>}
+        {open&&<div><div style={{fontSize:16,fontWeight:700,color:C.text}}>🚗 RL Tracker</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>{playerName||'Performance Intelligence'}</div></div>}
         {!open&&<div style={{fontSize:20,margin:"0 auto"}}>🚗</div>}
       </div>}
       {mobile&&<div style={{padding:"16px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -624,6 +1041,7 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
                   {open&&<div style={{textAlign:"right"}}>
                     <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:isActive?m.color:C.sub}}>{mmr}</div>
                     {trend!==0&&<div style={{fontSize:10,color:trend>0?C.green:C.red}}>{trend>0?"+":""}{trend}</div>}
+                    {(()=>{const nr=getNextRank(mmr,m.id,config);return nr?<div style={{fontSize:9,color:C.amber}}>+{nr.gap} → {nr.name.split(' ').slice(-1)[0]}</div>:null;})()}
                   </div>}
                 </button>
               );
@@ -681,6 +1099,7 @@ function HomePage({sessions,mmrHistory,tournaments,config,onNavigate,onEditMMR})
             {MODES.filter(m=>m.group===group).map(m=>{
               const mmr=getLatestMMR(mmrHistory,m.id,m.initMMR),rank=getRank(mmr,m.id,config),trend=getMMRTrend(mmrHistory,m.id);
               const mS=sessions.filter(s=>s.modeId===m.id),mM=mS.reduce((a,s)=>a+s.matches.length,0),mW=mS.reduce((a,s)=>a+s.matches.filter(isWin).length,0);
+              const nextRank=getNextRank(mmr,m.id,config);
               const isStd=group==="standard";
               return(
                 <div key={m.id} style={{background:C.card,borderRadius:12,padding:"20px",border:`1px solid ${C.border}`,cursor:"pointer",position:"relative"}}
@@ -697,6 +1116,7 @@ function HomePage({sessions,mmrHistory,tournaments,config,onNavigate,onEditMMR})
                       <div>
                         <div style={{fontSize:isStd?14:13,fontWeight:600,color:C.text}}>{m.name}</div>
                         <div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>
+                        {nextRank&&<div style={{fontSize:10,color:C.muted,marginTop:1}}>→ {nextRank.name} <span style={{color:C.amber,fontWeight:600}}>+{nextRank.gap}</span></div>}
                       </div>
                     </div>
                     <div style={{textAlign:"right"}}>
@@ -744,6 +1164,7 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
   const setMMRF=(field,val)=>setDraft(prev=>({...prev,[field]:val===""?null:Number(val)}));
   const src=editing?draft:session;
   const wins=src.matches.filter(isWin).length,losses=src.matches.filter(m=>m.result==="loss").length,draws=src.matches.filter(m=>m.result==="draw").length;
+  const detailHits=getModeHits(mode);
   const gf=src.matches.reduce((a,m)=>a+(m.score?.us||0),0),ga=src.matches.reduce((a,m)=>a+(m.score?.them||0),0);
   const mg=!duel?src.matches.reduce((a,m)=>a+(m.myGoals||0),0):null;
   const ma=!duel?src.matches.reduce((a,m)=>a+(m.myAssists||0),0):null;
@@ -778,12 +1199,16 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
             :<GhostBtn onClick={startEdit} color={C.blue}>✏️ Editar sesión</GhostBtn>}
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:`repeat(auto-fill,minmax(${!duel?'80px':'100px'},1fr))`,gap:8,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(80px,1fr))",gap:8,marginBottom:20}}>
         {[["Partidas",src.matches.length,C.text],["Victorias",wins,C.green],["Derrotas",losses,C.red],["Empates",draws,"#7289da"],["GF–GC",`${gf}–${ga}`,C.sub],...(!duel?[["⚽ Goles",mg??0,C.green],["🎯 Asist.",ma??0,C.blue],["🧤 Salvadas",ms??0,C.teal]]:[])].map(([l,v,col])=>(
           <Card key={l} style={{padding:"12px 14px"}}><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:.7,marginBottom:4}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{v}</div></Card>
         ))}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:20}}>
+        {src.sessionSummary&&<Card style={{borderColor:`${C.blue}30`,marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:8}}>💬 Análisis IA — Resumen de sesión</div>
+          <div style={{fontSize:13,color:C.sub,lineHeight:1.8}}>{src.sessionSummary}</div>
+        </Card>}
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <div style={{fontSize:14,fontWeight:600,color:C.sub}}>Historial de partidas</div>
@@ -815,9 +1240,12 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
                   <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.muted,minWidth:24}}>P{i+1}</span>
                   <ResultBadge result={m.result}/><ScoreBadge score={m.score}/>
                   {!duel&&<>{m.myGoals!=null&&<Tag color={C.green}>⚽ {m.myGoals}</Tag>}{m.myAssists!=null&&<Tag color={C.blue}>🎯 {m.myAssists}</Tag>}{m.mySaves!=null&&<Tag color={C.teal}>🧤 {m.mySaves}</Tag>}</>}
-                  {et>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted,marginLeft:"auto"}}>{et} err</span>}
+                  {et>0&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.red,marginLeft:"auto"}}>{et} err</span>}
+                  {(()=>{const th=Object.values(m.hits||{}).reduce((a,b)=>a+b,0)+(m.customHit?.count||0);return th>0?<Tag color={C.green}>{th} ✓</Tag>:null;})()}
                 </div>
-                {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingBottom:8,paddingLeft:36}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
+                {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingBottom:4,paddingLeft:36}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
+                {m.mecanica?.label&&<div style={{paddingLeft:36,paddingBottom:4,fontSize:11,color:C.blue}}>🎯 {m.mecanica.label}: <strong>{m.mecanica.logradas}/{m.mecanica.intentos}</strong> ({m.mecanica.intentos>0?Math.round(m.mecanica.logradas/m.mecanica.intentos*100):0}%)</div>}
+                {m.summary&&<div style={{marginLeft:36,marginBottom:6,padding:"8px 10px",background:`${C.blue}08`,borderRadius:6,fontSize:11,color:C.sub,lineHeight:1.6,borderLeft:`2px solid ${C.blue}40`}}>{m.summary}</div>}
               </div>
             );
           })}
@@ -846,26 +1274,108 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
   );
 }
 
-function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
-  const mode=MODES.find(m=>m.id===modeId),errors=getModeErrors(mode),duel=is1v1(modeId);
+function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},onSaveMechanics,onSave}){
+  const mode=MODES.find(m=>m.id===modeId),errors=getModeErrors(mode,custom),duel=is1v1(modeId);
   const latMMR=getLatestMMR(mmrHistory,modeId,mode.initMMR);
+  // Check for existing draft
+  const existingDraft=loadDraft(modeId);
+  const [showDraftBanner,setShowDraftBanner]=useState(!!existingDraft);
   const [step,setStep]=useState("setup"),[startMMR,setStartMMR]=useState(String(latMMR)),[focusErr,setFocusErr]=useState(null);
   const [matches,setMatches]=useState([]),[endMMR,setEndMMR]=useState(""),[currE,setCurrE]=useState({});
   const [currR,setCurrR]=useState(null),[scoreUs,setScoreUs]=useState(""),[scoreThem,setScoreThem]=useState("");
   const [myGoals,setMyGoals]=useState(""),[myAssists,setMyAssists]=useState(""),[mySaves,setMySaves]=useState("");
+  const [currH,setCurrH]=useState({});  // current hits
+  const [customHitLabel,setCustomHitLabel]=useState("");
+  const [customHitCount,setCustomHitCount]=useState(0);
+  const [mecLabel,setMecLabel]=useState("");
+  const [mecIntentos,setMecIntentos]=useState(0);
+  const [mecLogradas,setMecLogradas]=useState(0);
+  const [newMecInput,setNewMecInput]=useState("");
+  const [matchSummary,setMatchSummary]=useState(null);
+  const [loadingSummary,setLoadingSummary]=useState(false);
+  const [sessionSummary,setSessionSummary]=useState(null);
+  const [loadingSessionSummary,setLoadingSessionSummary]=useState(false);
+  const hits=getModeHits(mode,custom);
+  const modeMechanics=mechanics[modeId]||[];
   const totE=matches.reduce((tot,m)=>{errors.forEach(e=>{tot[e.id]=(tot[e.id]||0)+(m.errors[e.id]||0);});return tot;},{});
   const wins=matches.filter(isWin).length,currTot=Object.values(currE).reduce((a,b)=>a+b,0);
   const totalGF=matches.reduce((a,m)=>a+(m.score?.us||0),0),totalGA=matches.reduce((a,m)=>a+(m.score?.them||0),0);
   const totalMG=!duel?matches.reduce((a,m)=>a+(m.myGoals||0),0):null;
   const totalMA=!duel?matches.reduce((a,m)=>a+(m.myAssists||0),0):null;
   const totalMS=!duel?matches.reduce((a,m)=>a+(m.mySaves||0),0):null;
-  const addMatch=()=>{
+  const addMatch=async()=>{
     if(!currR)return;
     const score=scoreUs!==""&&scoreThem!==""?{us:Number(scoreUs),them:Number(scoreThem)}:null;
-    setMatches(p=>[...p,{id:Date.now(),result:currR,errors:{...currE},score,myGoals:!duel&&myGoals!==""?Number(myGoals):null,myAssists:!duel&&myAssists!==""?Number(myAssists):null,mySaves:!duel&&mySaves!==""?Number(mySaves):null}]);
-    setCurrE({});setCurrR(null);setScoreUs("");setScoreThem("");setMyGoals("");setMyAssists("");setMySaves("");
+    const mecanica=mecLabel?{label:mecLabel,intentos:mecIntentos,logradas:mecLogradas}:null;
+    const customHit=customHitLabel?{label:customHitLabel,count:customHitCount}:null;
+    const newMatch={id:Date.now(),result:currR,errors:{...currE},hits:{...currH},customHit,mecanica,score,
+      myGoals:!duel&&myGoals!==""?Number(myGoals):null,
+      myAssists:!duel&&myAssists!==""?Number(myAssists):null,
+      mySaves:!duel&&mySaves!==""?Number(mySaves):null,
+      summary:null};
+    setMatches(p=>[...p,newMatch]);
+    setCurrE({});setCurrH({});setCurrR(null);setScoreUs("");setScoreThem("");
+    setMyGoals("");setMyAssists("");setMySaves("");
+    setCustomHitLabel("");setCustomHitCount(0);setMecLabel("");setMecIntentos(0);setMecLogradas(0);setNewMecInput("");
+    // Auto-save draft after each match
+    const draft={step:"tracking",startMMR,focusErr,matches:[...matches,newMatch]};
+    saveDraft(modeId,draft);
+    setMatchSummary(null);
+    // Generate match summary async
+    if(getAIKey()){
+      setLoadingSummary(true);
+      const summary=await generateMatchSummary(newMatch,mode,errors,hits);
+      if(summary){
+        setMatchSummary(summary);
+        setMatches(p=>p.map(m=>m.id===newMatch.id?{...m,summary}:m));
+      }
+      setLoadingSummary(false);
+    }
   };
-  const saveSession=()=>onSave({id:Date.now(),date:new Date().toLocaleDateString("es-ES"),time:new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),modeId,modeName:mode.name,focusError:focusErr,startMMR:Number(startMMR)||null,endMMR:Number(endMMR)||null,matches});
+  const saveSession=async()=>{
+    setLoadingSessionSummary(true);
+    let sSum=null;
+    if(getAIKey()){ sSum=await generateSessionSummary(matches,mode,errors,hits); setSessionSummary(sSum); }
+    setLoadingSessionSummary(false);
+    clearDraft(modeId);
+    onSave({id:Date.now(),date:new Date().toLocaleDateString("es-ES"),time:new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),modeId,modeName:mode.name,focusError:focusErr,startMMR:Number(startMMR)||null,endMMR:Number(endMMR)||null,matches,sessionSummary:sSum});
+  };
+  // Draft banner — shown before setup if pending session exists
+  if(showDraftBanner&&existingDraft)return(
+    <div style={{padding:"32px",maxWidth:520,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
+        <div style={{width:48,height:48,borderRadius:14,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>{mode.icon}</div>
+        <div><h1 style={{fontSize:22,fontWeight:700,color:C.text}}>{mode.name}</h1><p style={{fontSize:13,color:C.muted}}>Sesión pendiente encontrada</p></div>
+      </div>
+      <div style={{background:`${C.amber}10`,border:`1px solid ${C.amber}40`,borderRadius:14,padding:"24px",marginBottom:20}}>
+        <div style={{fontSize:14,fontWeight:700,color:C.amber,marginBottom:12}}>📋 Tienes una sesión sin guardar</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+          {[["Partidas",existingDraft.matches?.length||0,C.text],["Victorias",(existingDraft.matches||[]).filter(isWin).length,C.green],["MMR inicio",existingDraft.startMMR||"—",C.amber]].map(([l,v,col])=>(
+            <div key={l} style={{background:C.card,borderRadius:8,padding:"10px",textAlign:"center",border:`1px solid ${C.border}`}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col}}>{v}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:3}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <button onClick={()=>{
+            setStartMMR(existingDraft.startMMR||String(latMMR));
+            setFocusErr(existingDraft.focusErr||null);
+            setMatches(existingDraft.matches||[]);
+            setStep(existingDraft.matches?.length>0?"tracking":"tracking");
+            setShowDraftBanner(false);
+          }} style={{padding:"13px",borderRadius:10,border:"none",background:mode.color,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+            ▶ Continuar sesión
+          </button>
+          <button onClick={()=>{ clearDraft(modeId); setShowDraftBanner(false); }}
+            style={{padding:"13px",borderRadius:10,border:`1px solid ${C.border}`,background:"none",color:C.muted,fontSize:14,cursor:"pointer"}}>
+            ✕ Descartar y empezar nueva
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   if(step==="setup")return(
     <div style={{padding:"32px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
@@ -879,7 +1389,10 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
             <NumInput value={startMMR} onChange={setStartMMR} placeholder="Ej: 740" large/>
             {startMMR&&!isNaN(startMMR)&&<div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}><div style={{width:8,height:8,borderRadius:2,background:getRank(Number(startMMR),modeId,config).color}}/><span style={{fontSize:13,color:getRank(Number(startMMR),modeId,config).color,fontWeight:500}}>{getRank(Number(startMMR),modeId,config).name}</span></div>}
           </Card>
-          <PrimaryBtn onClick={()=>setStep("tracking")} color={mode.color} disabled={!startMMR||isNaN(startMMR)}>Empezar sesión →</PrimaryBtn>
+          <PrimaryBtn onClick={()=>{
+            saveDraft(modeId,{step:"tracking",startMMR,focusErr,matches:[]});
+            setStep("tracking");
+          }} color={mode.color} disabled={!startMMR||isNaN(startMMR)}>Empezar sesión →</PrimaryBtn>
         </div>
         <Card>
           <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:4}}>Error Foco <span style={{color:C.muted,fontWeight:400}}>(opcional)</span></div>
@@ -918,6 +1431,75 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
               </Card>
             );})}
           </div>
+          {/* ACIERTOS */}
+          <Card style={{borderColor:`${C.green}30`,marginBottom:10}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.green,marginBottom:12}}>✓ Aciertos</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+              {hits.map(h=>{const cnt=currH[h.id]||0;return(
+                <div key={h.id} style={{background:C.surface,borderRadius:8,padding:"10px 12px",border:`1px solid ${cnt>0?`${C.green}60`:C.border}`}}>
+                  <div style={{fontSize:12,color:cnt>0?C.green:C.sub,marginBottom:8}}>{h.label}</div>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <button onClick={()=>setCurrH(p=>({...p,[h.id]:Math.max(0,(p[h.id]||0)-1)}))} disabled={cnt===0} style={{width:30,height:30,borderRadius:6,border:`1px solid ${C.border}`,background:cnt>0?C.hover:C.surface,color:cnt>0?C.text:C.muted,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:28,fontWeight:700,color:cnt>0?C.green:C.muted}}>{cnt}</span>
+                    <button onClick={()=>setCurrH(p=>({...p,[h.id]:(p[h.id]||0)+1}))} style={{width:30,height:30,borderRadius:6,border:`1px solid ${C.green}50`,background:`${C.green}15`,color:C.green,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                  </div>
+                </div>
+              );})}
+            </div>
+            {/* Custom hit */}
+            <div style={{borderTop:`1px solid ${C.border}`,paddingTop:10}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Acierto personalizado (opcional)</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input value={customHitLabel} onChange={e=>setCustomHitLabel(e.target.value)} placeholder="Ej: Musty flick..."
+                  style={{flex:1,background:C.surface,border:`1px solid ${customHitLabel?`${C.green}50`:C.border}`,borderRadius:8,padding:"7px 10px",color:C.text,fontSize:12,outline:"none"}}/>
+                <button onClick={()=>setCustomHitCount(p=>Math.max(0,p-1))} disabled={customHitCount===0} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:customHitCount>0?C.green:C.muted,minWidth:20,textAlign:"center"}}>{customHitCount}</span>
+                <button onClick={()=>setCustomHitCount(p=>p+1)} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.green}40`,background:`${C.green}15`,color:C.green,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+              </div>
+            </div>
+          </Card>
+
+          {/* MECÁNICA */}
+          <Card style={{borderColor:`${C.blue}30`,marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.blue}}>🎯 Mecánica a trabajar</div>
+              {mecLabel&&<button onClick={()=>{setMecLabel("");setMecIntentos(0);setMecLogradas(0);}} style={{background:"none",border:"none",color:C.muted,fontSize:11,cursor:"pointer"}}>✕ quitar</button>}
+            </div>
+            {/* Saved mechanics chips */}
+            {modeMechanics.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+              {modeMechanics.map(m=>(
+                <button key={m} onClick={()=>setMecLabel(mecLabel===m?"":m)}
+                  style={{padding:"5px 12px",borderRadius:20,border:`1.5px solid ${mecLabel===m?C.blue:C.border}`,background:mecLabel===m?`${C.blue}20`:"none",color:mecLabel===m?C.blue:C.muted,fontSize:12,cursor:"pointer",fontWeight:mecLabel===m?700:400}}>
+                  {m}
+                </button>
+              ))}
+            </div>}
+            {/* New mechanics input */}
+            <div style={{display:"flex",gap:8,marginBottom:mecLabel?12:0}}>
+              <input value={mecLabel&&!modeMechanics.includes(mecLabel)?mecLabel:newMecInput||""} 
+                onChange={e=>{setNewMecInput(e.target.value);if(!modeMechanics.includes(e.target.value))setMecLabel(e.target.value);}}
+                placeholder={modeMechanics.length>0?"Nueva mecánica...":"Ej: Aerial doble toque..."}
+                style={{flex:1,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",color:C.text,fontSize:12,outline:"none"}}/>
+              {newMecInput&&!modeMechanics.includes(newMecInput)&&<button onClick={()=>{
+                const updated={...mechanics,[modeId]:[...modeMechanics,newMecInput]};
+                onSaveMechanics&&onSaveMechanics(updated);
+                setMecLabel(newMecInput);setNewMecInput("");
+              }} style={{padding:"8px 12px",borderRadius:8,border:`1px solid ${C.blue}`,background:`${C.blue}20`,color:C.blue,fontSize:12,cursor:"pointer",fontWeight:600,whiteSpace:"nowrap"}}>+ Guardar</button>}
+            </div>
+            {mecLabel&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {[["Intentos",mecIntentos,setMecIntentos,C.sub],[`Logradas${mecIntentos>0?" ("+Math.round(mecLogradas/mecIntentos*100)+"%)":""}`,mecLogradas,setMecLogradas,C.blue]].map(([label,val,setter,col])=>(
+                <div key={label} style={{background:C.surface,borderRadius:8,padding:"10px 12px",border:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:6}}>{label}</div>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <button onClick={()=>setter(p=>Math.max(0,p-1))} disabled={val===0} style={{width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:28,fontWeight:700,color:col}}>{val}</span>
+                    <button onClick={()=>setter(p=>p+1)} style={{width:28,height:28,borderRadius:6,border:`1px solid ${col}40`,background:`${col}15`,color:col,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                  </div>
+                </div>
+              ))}
+            </div>}
+          </Card>
+
           <Card>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:12}}>Resultado de la partida</div>
             <div className="result-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:16}}>
@@ -928,6 +1510,15 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
             <div style={{fontSize:12,fontWeight:600,color:C.sub,marginBottom:10}}>Estadísticas <span style={{color:C.muted,fontWeight:400}}>(opcional)</span></div>
             <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
             <div style={{marginTop:16}}><PrimaryBtn onClick={addMatch} color={mode.color} disabled={!currR}>✓ Guardar partida {matches.length+1}</PrimaryBtn></div>
+            {loadingSummary&&<div style={{marginTop:10,padding:"8px 12px",background:`${C.amber}10`,borderRadius:8,fontSize:12,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA...</div>}
+            {matchSummary&&!loadingSummary&&<div style={{marginTop:10,padding:"12px",
+              background:matchSummary.startsWith('__')?`${C.red}10`:`${C.blue}10`,
+              border:`1px solid ${matchSummary.startsWith('__')?C.red:C.blue}30`,borderRadius:8,fontSize:12,color:C.sub,lineHeight:1.7}}>
+              <div style={{fontSize:11,fontWeight:700,color:matchSummary.startsWith('__')?C.red:C.blue,marginBottom:6}}>
+                {matchSummary.startsWith('__NO_KEY__')?'⚠ Sin API Key — configúrala en ⚙ Config':matchSummary.startsWith('__ERROR__')?'✕ Error IA: '+matchSummary.replace('__ERROR__: ',''):'💬 Análisis IA — Última partida'}
+              </div>
+              {!matchSummary.startsWith('__')&&matchSummary}
+            </div>}
           </Card>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -938,7 +1529,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
                 <div key={l}><div style={{fontSize:11,color:C.muted,marginBottom:2}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col}}>{v}</div></div>
               ))}
             </div>
-            {matches.length>0&&<div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`,display:"grid",gridTemplateColumns:`1fr 1fr${!duel?" 1fr 1fr 1fr":""}`,gap:8}}>
+            {matches.length>0&&<div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`,display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(80px,1fr))",gap:8}}>
               <div><div style={{fontSize:10,color:C.muted}}>GF</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.green,fontWeight:700}}>{totalGF}</div></div>
               <div><div style={{fontSize:10,color:C.muted}}>GC</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.red,fontWeight:700}}>{totalGA}</div></div>
               {!duel&&<><div><div style={{fontSize:10,color:C.green}}>⚽</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.green,fontWeight:700}}>{totalMG}</div></div><div><div style={{fontSize:10,color:C.blue}}>🎯</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.blue,fontWeight:700}}>{totalMA}</div></div><div><div style={{fontSize:10,color:C.teal}}>🧤</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:C.teal,fontWeight:700}}>{totalMS}</div></div></>}
@@ -952,18 +1543,32 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
                   <span style={{color:C.muted,fontSize:11,minWidth:22}}>P{matches.length-i}</span>
                   <ResultBadge result={m.result}/><ScoreBadge score={m.score}/>
                   {!duel&&<>{m.myGoals!=null&&<Tag color={C.green}>⚽{m.myGoals}</Tag>}{m.myAssists!=null&&<Tag color={C.blue}>🎯{m.myAssists}</Tag>}{m.mySaves!=null&&<Tag color={C.teal}>🧤{m.mySaves}</Tag>}</>}
-                  {et>0&&<span style={{color:C.muted,fontSize:11}}>{et}e</span>}
+                  {et>0&&<span style={{color:C.red,fontSize:11}}>{et}e</span>}
+                  {(()=>{const th=Object.values(m.hits||{}).reduce((a,b)=>a+b,0)+(m.customHit?.count||0);return th>0?<span style={{color:C.green,fontSize:11}}>{th}✓</span>:null;})()}
                 </div>
+                {m.mecanica?.label&&<div style={{fontSize:10,color:C.blue,paddingLeft:22}}>🎯 {m.mecanica.label}: {m.mecanica.logradas}/{m.mecanica.intentos}</div>}
               </div>
             );})}
           </Card>}
-          <SecondaryBtn onClick={()=>setStep("end")} disabled={matches.length===0}>Terminar sesión →</SecondaryBtn>
+          <div style={{position:"sticky",bottom:0,background:C.bg,paddingTop:10,paddingBottom:10,zIndex:10}}>
+            <SecondaryBtn onClick={()=>setStep("end")} disabled={matches.length===0}>
+              {matches.length===0?"Terminar sesión →":`Terminar sesión (${matches.length}p) →`}
+            </SecondaryBtn>
+          </div>
         </div>
       </div>
     </div>
   );
   const mmrDelta=endMMR&&startMMR?Number(endMMR)-Number(startMMR):null;
   const focusDef=focusErr?errors.find(e=>e.id===focusErr):null;
+  // Previous session comparison
+  const prevSessions=sessions.filter(s=>s.modeId===modeId);
+  const prevSession=prevSessions.length>0?prevSessions[0]:null; // sessions are newest-first
+  const prevComparison=prevSession?errors.map(e=>{
+    const currAvg=matches.length>0?(matches.reduce((a,m)=>a+(m.errors[e.id]||0),0)/matches.length):0;
+    const prevAvg=prevSession.matches.length>0?(prevSession.matches.reduce((a,m)=>a+(m.errors[e.id]||0),0)/prevSession.matches.length):0;
+    return{...e,curr:currAvg,prev:prevAvg,delta:currAvg-prevAvg};
+  }).filter(e=>e.curr>0||e.prev>0):null;
   const focusTot=focusErr?(totE[focusErr]||0):null;
   const focusAvg=focusTot!=null&&matches.length>0?(focusTot/matches.length).toFixed(2):null;
   const histAvg=focusErr?avgErr(sessions,modeId,focusErr):null;
@@ -981,11 +1586,58 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
               <Card key={l} style={{padding:"14px 16px"}}><StatBlock label={l} value={v} valueColor={col}/></Card>
             ))}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:`1fr 1fr${!duel?" 1fr 1fr 1fr":""}`,gap:8,marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))",gap:8,marginBottom:16}}>
             <Card style={{padding:"14px 16px"}}><StatBlock label="GF" value={totalGF} valueColor={C.green}/></Card>
             <Card style={{padding:"14px 16px"}}><StatBlock label="GC" value={totalGA} valueColor={C.red}/></Card>
             {!duel&&<><Card style={{padding:"14px 16px"}}><StatBlock label="⚽ Mis goles" value={totalMG??0} valueColor={C.green}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.blue}40`}}><StatBlock label="🎯 Asistencias" value={totalMA??0} valueColor={C.blue}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.teal}40`}}><StatBlock label="🧤 Salvadas" value={totalMS??0} valueColor={C.teal}/></Card></>}
           </div>
+          {/* HITS SUMMARY */}
+          {(()=>{
+            const totH=matches.reduce((tot,m)=>{hits.forEach(h=>{tot[h.id]=(tot[h.id]||0)+(m.hits?.[h.id]||0);});return tot;},{});
+            const totHits=Object.values(totH).reduce((a,b)=>a+b,0);
+            const customHits=matches.filter(m=>m.customHit?.label);
+            return totHits>0||customHits.length>0?(<Card style={{borderColor:`${C.green}30`,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.green,marginBottom:12}}>✓ Aciertos de la sesión</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {hits.map(h=>{const tot=totH[h.id]||0;return tot>0?(
+                  <div key={h.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:`${C.green}08`,borderRadius:8,border:`1px solid ${C.green}25`}}>
+                    <span style={{fontSize:12,color:C.green}}>{h.label}</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:C.green}}>{tot}</span>
+                  </div>
+                ):null;})}
+                {customHits.map((m,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:`${C.teal}08`,borderRadius:8,border:`1px solid ${C.teal}25`}}>
+                    <span style={{fontSize:12,color:C.teal}}>★ {m.customHit.label}</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:C.teal}}>{m.customHit.count||0}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>):null;
+          })()}
+
+          {/* MECÁNICAS SUMMARY */}
+          {(()=>{
+            const mecs=matches.filter(m=>m.mecanica?.label);
+            if(mecs.length===0)return null;
+            const mecMap={};
+            mecs.forEach(m=>{const k=m.mecanica.label;if(!mecMap[k])mecMap[k]={intentos:0,logradas:0};mecMap[k].intentos+=m.mecanica.intentos||0;mecMap[k].logradas+=m.mecanica.logradas||0;});
+            return(<Card style={{borderColor:`${C.blue}30`,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.blue,marginBottom:12}}>🎯 Mecánicas trabajadas</div>
+              {Object.entries(mecMap).map(([label,{intentos,logradas}])=>{
+                const pct=intentos>0?Math.round(logradas/intentos*100):0;
+                return(<div key={label} style={{marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <span style={{fontSize:13,color:C.text,fontWeight:500}}>{label}</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:pct>=70?C.green:pct>=40?C.amber:C.red,fontWeight:700}}>{logradas}/{intentos} ({pct}%)</span>
+                  </div>
+                  <div style={{height:4,background:C.border,borderRadius:2}}>
+                    <div style={{height:"100%",width:`${pct}%`,background:pct>=70?C.green:pct>=40?C.amber:C.red,borderRadius:2,transition:"width .3s"}}/>
+                  </div>
+                </div>);
+              })}
+            </Card>);
+          })()}
+
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
             {errors.map(e=>{const tot=totE[e.id]||0,avg=matches.length>0?(tot/matches.length).toFixed(1):"0",isFocus=focusErr===e.id;return(
               <Card key={e.id} style={{borderColor:isFocus?mode.color:C.border,padding:"16px"}}>
@@ -1013,6 +1665,37 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
               );
             })}
           </Card>
+          {prevSession&&prevComparison&&prevComparison.length>0&&<Card style={{marginBottom:16,borderColor:`${C.blue}30`}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.blue,marginBottom:4}}>📊 vs Sesión anterior</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:14}}>{prevSession.date}{prevSession.time&&prevSession.time!=="Posicionamiento"?` · ${prevSession.time}`:""} · {prevSession.matches.length}p</div>
+            {prevComparison.map(e=>{
+              const imp=e.delta<0,same=e.delta===0;
+              const pct=e.prev>0?Math.round(Math.abs(e.delta)/e.prev*100):null;
+              return(
+                <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:12,color:C.sub,flex:1}}>{e.label}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:12,color:C.muted}}>{e.prev.toFixed(1)}</span>
+                    <span style={{color:C.muted,fontSize:10}}>→</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:same?C.muted:imp?C.green:C.red}}>{e.curr.toFixed(1)}</span>
+                    {!same&&pct!=null&&<span style={{fontSize:10,fontWeight:700,color:imp?C.green:C.red,background:imp?`${C.green}15`:`${C.red}15`,borderRadius:4,padding:"1px 6px"}}>
+                      {imp?"▼":"▲"}{pct}%
+                    </span>}
+                  </div>
+                </div>
+              );
+            })}
+            {(()=>{
+              const improved=prevComparison.filter(e=>e.delta<0).length;
+              const worsened=prevComparison.filter(e=>e.delta>0).length;
+              return improved>0||worsened>0?(
+                <div style={{display:"flex",gap:10,marginTop:10}}>
+                  {improved>0&&<span style={{fontSize:11,color:C.green,background:`${C.green}10`,borderRadius:6,padding:"3px 10px"}}>▼ {improved} error{improved>1?"es":""} mejorado{improved>1?"s":""}</span>}
+                  {worsened>0&&<span style={{fontSize:11,color:C.red,background:`${C.red}10`,borderRadius:6,padding:"3px 10px"}}>▲ {worsened} error{worsened>1?"es":""} empeorado{worsened>1?"s":""}</span>}
+                </div>
+              ):null;
+            })()}
+          </Card>}
           {focusDef&&<Card style={{borderColor:improved===true?`${C.green}40`:improved===false?`${C.red}40`:C.border}}>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Error Foco: {focusDef.label}</div>
             <div style={{display:"flex",gap:32,alignItems:"flex-end",flexWrap:"wrap"}}>
@@ -1031,9 +1714,20 @@ function SessionPage({modeId,sessions,mmrHistory,config,onSave}){
               {[["Inicio",startMMR,C.muted],["Final",endMMR,C.text],["Cambio",(mmrDelta>=0?"+":"")+mmrDelta,mmrDelta>=0?C.green:C.red]].map(([l,v,col])=><div key={l}><div style={{fontSize:11,color:C.muted}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:col}}>{v}</div></div>)}
             </div>}
           </Card>
-          <PrimaryBtn onClick={saveSession} color={mode.color}>💾 Guardar sesión</PrimaryBtn>
+          <PrimaryBtn onClick={saveSession} color={mode.color} disabled={loadingSessionSummary}>
+            {loadingSessionSummary?"⟳ Analizando...":"💾 Guardar sesión"}
+          </PrimaryBtn>
         </div>
       </div>
+      {/* Session summary — full width below grid */}
+      {loadingSessionSummary&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.amber}10`,border:`1px solid ${C.amber}30`,borderRadius:10,fontSize:13,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA de sesión...</div>}
+      {sessionSummary&&!sessionSummary.startsWith('__')&&<div style={{marginTop:16,padding:"20px 24px",background:`${C.blue}08`,border:`1px solid ${C.blue}30`,borderRadius:12,lineHeight:1.9}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:10,textTransform:"uppercase",letterSpacing:.8}}>💬 Análisis IA — Sesión completa</div>
+        <div style={{fontSize:14,color:C.sub}}>{sessionSummary}</div>
+      </div>}
+      {sessionSummary&&sessionSummary.startsWith('__ERROR__')&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.red}10`,border:`1px solid ${C.red}30`,borderRadius:10,fontSize:12,color:C.red}}>
+        ✕ Error IA: {sessionSummary.replace('__ERROR__: ','')}
+      </div>}
     </div>
   );
 }
@@ -1062,7 +1756,7 @@ function StatsPage({sessions,mmrHistory,config,onViewSession}){
             </div>
             <Sparkline data={mmrHistory[sel]||[]} color={mode.color} height={60}/>
           </Card>
-          <div style={{display:"grid",gridTemplateColumns:`1fr 1fr${!duel?" 1fr 1fr 1fr":""}`,gap:8,marginBottom:14}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(90px,1fr))",gap:8,marginBottom:14}}>
             <Card style={{padding:"14px 16px"}}><StatBlock label="GF" value={totGF} valueColor={C.green}/></Card>
             <Card style={{padding:"14px 16px"}}><StatBlock label="GC" value={totGA} valueColor={C.red}/></Card>
             {!duel&&<><Card style={{padding:"14px 16px"}}><StatBlock label="⚽ Mis goles" value={totMG??0} valueColor={C.green}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.blue}40`}}><StatBlock label="🎯 Asist." value={totMA??0} valueColor={C.blue}/></Card><Card style={{padding:"14px 16px",borderColor:`${C.teal}40`}}><StatBlock label="🧤 Salvadas" value={totMS??0} valueColor={C.teal}/></Card></>}
@@ -1397,216 +2091,129 @@ function TournamentPage({sessions,tournaments,config,onSaveTournament}){
 }
 
 
-// ─── ONBOARDING WIZARD ───────────────────────────────────────────────────────
-
 const OKEY = 'rlt3f_onboarded';
 function isOnboarded(){ return !!localStorage.getItem(OKEY); }
 function setOnboarded(){ localStorage.setItem(OKEY,'1'); }
 
 function OnboardingWizard({ onComplete }) {
-  const [step, setStep]     = useState(0); // 0=welcome, 1=name, 2=mmr-standard, 3=mmr-special, 4=done
-  const [name, setName]     = useState('');
-  const [mmrs, setMmrs]     = useState(() => {
-    const m = {}; MODES.forEach(mode => { m[mode.id] = ''; }); return m;
-  });
-
+  const [step, setStep]  = useState(0);
+  const [name, setName]  = useState('');
+  const [mmrs, setMmrs]  = useState(() => { const m={}; MODES.forEach(mode=>{m[mode.id]=''}); return m; });
   const setMmr = (id, val) => setMmrs(prev => ({ ...prev, [id]: val }));
-
   const stdModes = MODES.filter(m => m.group === 'standard');
   const speModes = MODES.filter(m => m.group === 'special');
-
   const allStdFilled = stdModes.every(m => mmrs[m.id] !== '' && !isNaN(mmrs[m.id]));
   const allSpeFilled = speModes.every(m => mmrs[m.id] !== '' && !isNaN(mmrs[m.id]));
-
   const finish = () => {
-    // Build mmr history from wizard inputs
-    const hist = {};
-    const today = new Date().toLocaleDateString('es-ES');
-    MODES.forEach(mode => {
-      const val = Number(mmrs[mode.id]) || 0;
-      hist[mode.id] = [{ date: today, mmr: val }];
-    });
+    const hist={}, today=new Date().toLocaleDateString('es-ES');
+    MODES.forEach(mode=>{ hist[mode.id]=[{date:today,mmr:Number(mmrs[mode.id])||0}]; });
     setOnboarded();
     onComplete({ name, mmrHistory: hist });
   };
-
-  const steps = ['Bienvenida', 'Tu nombre', 'Modos estándar', 'Modos especiales'];
-
+  const steps = ['Bienvenida','Tu nombre','Modos estándar','Modos especiales'];
   return (
     <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
       <div style={{width:'100%',maxWidth:520}}>
-        {/* Logo */}
         <div style={{textAlign:'center',marginBottom:32}}>
           <div style={{fontSize:56,marginBottom:8}}>🚗</div>
           <div style={{fontSize:22,fontWeight:700,color:C.text}}>RL Tracker</div>
           <div style={{fontSize:13,color:C.muted,marginTop:4}}>Performance Intelligence</div>
         </div>
-
-        {/* Progress */}
-        {step > 0 && step < 4 && (
-          <div style={{display:'flex',gap:6,marginBottom:28,justifyContent:'center'}}>
-            {steps.slice(1).map((s,i) => (
-              <div key={s} style={{display:'flex',alignItems:'center',gap:6}}>
-                <div style={{width:24,height:24,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,
-                  background: i+1 < step ? C.green : i+1 === step ? C.blue : C.surface,
-                  color: i+1 <= step ? '#fff' : C.muted,
-                  border: `1px solid ${i+1 < step ? C.green : i+1 === step ? C.blue : C.border}`}}>
-                  {i+1 < step ? '✓' : i+2}
-                </div>
-                {i < 2 && <div style={{width:24,height:1,background: i+1 < step ? C.green : C.border}}/>}
+        {step>0&&step<4&&<div style={{display:'flex',gap:6,marginBottom:28,justifyContent:'center'}}>
+          {steps.slice(1).map((s,i)=>(
+            <div key={s} style={{display:'flex',alignItems:'center',gap:6}}>
+              <div style={{width:24,height:24,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,
+                background:i+1<step?C.green:i+1===step?C.blue:C.surface,
+                color:i+1<=step?'#fff':C.muted,border:`1px solid ${i+1<step?C.green:i+1===step?C.blue:C.border}`}}>
+                {i+1<step?'✓':i+2}
+              </div>
+              {i<2&&<div style={{width:24,height:1,background:i+1<step?C.green:C.border}}/>}
+            </div>
+          ))}
+        </div>}
+        {step===0&&<div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`,textAlign:'center'}}>
+          <h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:12}}>Bienvenido a RL Tracker</h1>
+          <p style={{fontSize:14,color:C.muted,lineHeight:1.7,marginBottom:28}}>Tu herramienta personal para trackear MMR, analizar errores y mejorar en Rocket League.<br/><br/>Vamos a configurar tu perfil en menos de un minuto.</p>
+          <div style={{background:`${C.blue}10`,border:`1px solid ${C.blue}30`,borderRadius:10,padding:16,marginBottom:28,textAlign:'left'}}>
+            {['Registra sesiones y partidas por modo','Analiza tus errores más frecuentes','Sincroniza en todos tus dispositivos'].map(t=>(
+              <div key={t} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+                <span style={{color:C.green,fontSize:14}}>✓</span><span style={{fontSize:13,color:C.sub}}>{t}</span>
               </div>
             ))}
           </div>
-        )}
-
-        {/* STEP 0 — Welcome */}
-        {step === 0 && (
-          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`,textAlign:'center'}}>
-            <h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:12}}>Bienvenido a RL Tracker</h1>
-            <p style={{fontSize:14,color:C.muted,lineHeight:1.7,marginBottom:28}}>
-              Tu herramienta personal para trackear MMR, analizar errores y mejorar en Rocket League.<br/><br/>
-              Vamos a configurar tu perfil en menos de un minuto.
-            </p>
-            <div style={{background:`${C.blue}10`,border:`1px solid ${C.blue}30`,borderRadius:10,padding:16,marginBottom:28,textAlign:'left'}}>
-              {['Registra sesiones y partidas por modo','Analiza tus errores más frecuentes','Sincroniza en todos tus dispositivos'].map(t => (
-                <div key={t} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
-                  <span style={{color:C.green,fontSize:14}}>✓</span>
-                  <span style={{fontSize:13,color:C.sub}}>{t}</span>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setStep(1)}
-              style={{width:'100%',padding:'14px',background:C.blue,color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>
-              Empezar configuración →
-            </button>
+          <button onClick={()=>setStep(1)} style={{width:'100%',padding:'14px',background:C.blue,color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>Empezar configuración →</button>
+        </div>}
+        {step===1&&<div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
+          <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>¿Cómo te llaman?</h2>
+          <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Tu gamertag o nombre para personalizar la app.</p>
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Ej: ProPlayer99"
+            style={{width:'100%',background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:'14px 16px',color:C.text,fontSize:20,fontWeight:700,fontFamily:"'DM Sans',sans-serif",marginBottom:24,outline:'none'}}
+            onKeyDown={e=>e.key==='Enter'&&name.trim()&&setStep(2)} autoFocus/>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <button onClick={()=>setStep(0)} style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>← Atrás</button>
+            <button onClick={()=>setStep(2)} disabled={!name.trim()} style={{padding:'12px',background:name.trim()?C.blue:C.border,color:name.trim()?'#fff':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:name.trim()?'pointer':'default'}}>Continuar →</button>
           </div>
-        )}
-
-        {/* STEP 1 — Name */}
-        {step === 1 && (
-          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
-            <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>¿Cómo te llaman?</h2>
-            <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Tu gamertag o nombre para personalizar la app.</p>
-            <input value={name} onChange={e => setName(e.target.value)}
-              placeholder="Ej: SebaxGamer11"
-              style={{width:'100%',background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:'14px 16px',color:C.text,fontSize:20,fontWeight:700,fontFamily:"'DM Sans',sans-serif",marginBottom:24,outline:'none'}}
-              onKeyDown={e => e.key === 'Enter' && name.trim() && setStep(2)}
-              autoFocus/>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-              <button onClick={() => setStep(0)}
-                style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>
-                ← Atrás
-              </button>
-              <button onClick={() => setStep(2)} disabled={!name.trim()}
-                style={{padding:'12px',background:name.trim()?C.blue:C.border,color:name.trim()?'#fff':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:name.trim()?'pointer':'default'}}>
-                Continuar →
-              </button>
-            </div>
+        </div>}
+        {step===2&&<div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
+          <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>Modos Estándar</h2>
+          <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Pon tu MMR actual. Si no juegas uno, pon 0.</p>
+          {stdModes.map(mode=>{
+            const val=mmrs[mode.id]; const rank=val!==''&&!isNaN(val)?getRank(Number(val),mode.id,DEFAULT_MODE_RANKS):null;
+            return(<div key={mode.id} style={{marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+                <div style={{width:36,height:36,borderRadius:10,background:`${mode.color}20`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>{mode.icon}</div>
+                <div style={{flex:1}}><div style={{fontSize:14,fontWeight:600,color:C.text}}>{mode.name}</div>{rank&&<div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>}</div>
+                <input type="number" value={val} onChange={e=>setMmr(mode.id,e.target.value)} placeholder="MMR"
+                  style={{width:100,background:C.card,border:`1px solid ${val?mode.color:C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:18,fontWeight:700,fontFamily:"'DM Mono',monospace",textAlign:'center',outline:'none'}}/>
+              </div>
+            </div>);
+          })}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:8}}>
+            <button onClick={()=>setStep(1)} style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>← Atrás</button>
+            <button onClick={()=>setStep(3)} disabled={!allStdFilled} style={{padding:'12px',background:allStdFilled?C.blue:C.border,color:allStdFilled?'#fff':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:allStdFilled?'pointer':'default'}}>Continuar →</button>
           </div>
-        )}
-
-        {/* STEP 2 — Standard MMRs */}
-        {step === 2 && (
-          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
-            <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>Modos Estándar</h2>
-            <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Pon tu MMR actual en cada modo. Si no juegas uno, pon 0.</p>
-            {stdModes.map(mode => {
-              const val = mmrs[mode.id];
-              const rank = val !== '' && !isNaN(val) ? getRank(Number(val), mode.id, loadConfig()) : null;
-              return (
-                <div key={mode.id} style={{marginBottom:16}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
-                    <div style={{width:36,height:36,borderRadius:10,background:`${mode.color}20`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18}}>{mode.icon}</div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:14,fontWeight:600,color:C.text}}>{mode.name}</div>
-                      {rank && <div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>}
-                    </div>
-                    <input type="number" value={val} onChange={e => setMmr(mode.id, e.target.value)}
-                      placeholder="MMR"
-                      style={{width:100,background:C.card,border:`1px solid ${val?mode.color:C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:18,fontWeight:700,fontFamily:"'DM Mono',monospace",textAlign:'center',outline:'none'}}/>
-                  </div>
-                </div>
-              );
-            })}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:8}}>
-              <button onClick={() => setStep(1)}
-                style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>
-                ← Atrás
-              </button>
-              <button onClick={() => setStep(3)} disabled={!allStdFilled}
-                style={{padding:'12px',background:allStdFilled?C.blue:C.border,color:allStdFilled?'#fff':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:allStdFilled?'pointer':'default'}}>
-                Continuar →
-              </button>
-            </div>
+        </div>}
+        {step===3&&<div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
+          <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>Modos Especiales</h2>
+          <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Si no juegas alguno, pon 0.</p>
+          {speModes.map(mode=>{
+            const val=mmrs[mode.id]; const rank=val!==''&&!isNaN(val)?getRank(Number(val),mode.id,DEFAULT_MODE_RANKS):null;
+            return(<div key={mode.id} style={{marginBottom:14}}>
+              <div style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{width:34,height:34,borderRadius:10,background:`${mode.color}20`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>{mode.icon}</div>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:C.text}}>{mode.name}</div>{rank&&<div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>}</div>
+                <input type="number" value={val} onChange={e=>setMmr(mode.id,e.target.value)} placeholder="MMR"
+                  style={{width:100,background:C.card,border:`1px solid ${val?mode.color:C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:18,fontWeight:700,fontFamily:"'DM Mono',monospace",textAlign:'center',outline:'none'}}/>
+              </div>
+            </div>);
+          })}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:16}}>
+            <button onClick={()=>setStep(2)} style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>← Atrás</button>
+            <button onClick={finish} disabled={!allSpeFilled} style={{padding:'12px',background:allSpeFilled?C.green:C.border,color:allSpeFilled?'#000':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:allSpeFilled?'pointer':'default'}}>✓ Empezar →</button>
           </div>
-        )}
-
-        {/* STEP 3 — Special MMRs */}
-        {step === 3 && (
-          <div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
-            <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>Modos Especiales</h2>
-            <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Misma idea. Si no juegas alguno, pon 0.</p>
-            {speModes.map(mode => {
-              const val = mmrs[mode.id];
-              const rank = val !== '' && !isNaN(val) ? getRank(Number(val), mode.id, loadConfig()) : null;
-              return (
-                <div key={mode.id} style={{marginBottom:14}}>
-                  <div style={{display:'flex',alignItems:'center',gap:10}}>
-                    <div style={{width:34,height:34,borderRadius:10,background:`${mode.color}20`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>{mode.icon}</div>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:600,color:C.text}}>{mode.name}</div>
-                      {rank && <div style={{fontSize:11,color:rank.color,fontWeight:500}}>{rank.name}</div>}
-                    </div>
-                    <input type="number" value={val} onChange={e => setMmr(mode.id, e.target.value)}
-                      placeholder="MMR"
-                      style={{width:100,background:C.card,border:`1px solid ${val?mode.color:C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:18,fontWeight:700,fontFamily:"'DM Mono',monospace",textAlign:'center',outline:'none'}}/>
-                  </div>
-                </div>
-              );
-            })}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:16}}>
-              <button onClick={() => setStep(2)}
-                style={{padding:'12px',background:'none',border:`1px solid ${C.border}`,borderRadius:10,color:C.muted,fontSize:14,cursor:'pointer'}}>
-                ← Atrás
-              </button>
-              <button onClick={finish} disabled={!allSpeFilled}
-                style={{padding:'12px',background:allSpeFilled?C.green:C.border,color:allSpeFilled?'#000':C.muted,border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:allSpeFilled?'pointer':'default'}}>
-                ✓ Empezar →
-              </button>
-            </div>
-          </div>
-        )}
+        </div>}
       </div>
     </div>
   );
 }
 
 function App(){
-  const [onboarded,   setOnboarded]   = useState(isOnboarded);
-  const [playerName,  setPlayerName]  = useState(()=>localStorage.getItem('rlt3f_name')||'');
+  const [onboarded,  setOnboardedS]  = useState(isOnboarded);
+  const [playerName, setPlayerName]  = useState(()=>localStorage.getItem('rlt3f_name')||'');
   const [page,        setPage]        = useState("home");
   const [sessions,    setSessions]    = useState(loadSessions);
   const [mmrHist,     setMmrHist]     = useState(loadMMR);
   const [tournaments, setTournaments] = useState(loadTournaments);
   const [config,      setConfig]      = useState(loadConfig);
+  const [custom,      setCustom]      = useState(loadCustomItems);
+  const [mechanics,   setMechanics]   = useState(loadMechanics);
   const [viewSess,    setViewSess]    = useState(null);
   const [mmrModal,    setMmrModal]    = useState(null);
   const [showCloud,   setShowCloud]   = useState(false);
   const [showImport,  setShowImport]  = useState(false);
-  const [syncStatus,  setSyncStatus]  = useState('idle');
+  const [syncStatus,  setSyncStatus]  = useState('idle'); // idle | syncing | ok | error | no_config
   const [lastSync,    setLastSync]    = useState(null);
   const cloudCfg = getCloudCfg();
-
-  if (!onboarded) return (
-    <OnboardingWizard onComplete={({ name, mmrHistory }) => {
-      localStorage.setItem('rlt3f_name', name);
-      setPlayerName(name);
-      setMmrHist(mmrHistory);
-      saveMMR(mmrHistory);
-      setOnboarded(true);
-      setOnboarded(true);
-    }}/>
-  );
 
   // Auto-pull on load if cloud configured
   const doInit = async () => {
@@ -1624,7 +2231,7 @@ function App(){
   };
 
   // Run once on mount
-  useState(() => { doInit(); }, []);
+  React.useEffect(() => { doInit(); }, []);
 
   const doSync = async (s, m, t, cfg) => {
     if (!getCloudCfg()) { setSyncStatus('no_config'); return; }
@@ -1652,6 +2259,8 @@ function App(){
     doSync(sessions, nh, tournaments, config);
   };
   const handleSaveConfig = (cfg) => { setConfig(cfg); saveConfig(cfg); doSync(sessions, mmrHist, tournaments, cfg); };
+  const handleSaveCustom = (cx) => { setCustom(cx); saveCustomItems(cx); };
+  const handleSaveMechanics = (mx) => { setMechanics(mx); saveMechanics(mx); };
   const handleSaveTournament = (t) => { const nt=[t,...tournaments]; setTournaments(nt); saveTournaments(nt); doSync(sessions, mmrHist, nt, config); };
 
   const handleImport = (bundle) => {
@@ -1679,10 +2288,21 @@ function App(){
   const syncColor = syncStatus==='ok'?C.green : syncStatus==='syncing'?C.amber : syncStatus==='error'?C.red : C.muted;
   const syncLabel = syncStatus==='ok'?'✓ Sync' : syncStatus==='syncing'?'⟳ Sync…' : syncStatus==='error'?'✕ Sync' : cloudCfg ? '↕ Sync' : '☁ Config';
 
+  if(!onboarded) return(
+    <OnboardingWizard onComplete={({name,mmrHistory})=>{
+      localStorage.setItem('rlt3f_name',name);
+      setPlayerName(name);
+      setMmrHist(mmrHistory);
+      saveMMR(mmrHistory);
+      setOnboardedS(true);
+    }}/>
+  );
+
   return(
     <AppShell activePage={page} onNavigate={p=>{setPage(p);setViewSess(null);}} sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config}
       syncStatus={syncStatus} syncLabel={syncLabel} syncColor={syncColor} lastSync={lastSync}
-      onOpenCloud={()=>setShowCloud(true)} onOpenImport={()=>setShowImport(true)} onPullNow={handlePullNow} cloudCfg={cloudCfg} playerName={playerName}>
+      onOpenCloud={()=>setShowCloud(true)} onOpenImport={()=>setShowImport(true)} onPullNow={handlePullNow} cloudCfg={cloudCfg}
+      custom={custom} mechanics={mechanics} onSaveCustom={handleSaveCustom} onSaveMechanics={handleSaveMechanics} playerName={playerName}>
       {mmrModal&&<MMREditModal mode={mmrModal} currentMMR={getLatestMMR(mmrHist,mmrModal.id,mmrModal.initMMR)} config={config} onSave={mmr=>handleSaveMMR(mmrModal,mmr)} onClose={()=>setMmrModal(null)}/>}
       {showCloud&&<CloudConfigModal onClose={()=>setShowCloud(false)} onSaved={()=>{setSyncStatus('idle');doInit();}}/>}
       {showImport&&<ImportExportModal onClose={()=>setShowImport(false)} onImport={handleImport}/>}
@@ -1691,8 +2311,8 @@ function App(){
         :page==="home"        ?<HomePage sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config} onNavigate={setPage} onEditMMR={m=>setMmrModal(m)}/>
         :page==="stats"       ?<StatsPage sessions={sessions} mmrHistory={mmrHist} config={config} onViewSession={s=>setViewSess(s)}/>
         :page==="tournaments" ?<TournamentPage sessions={sessions} tournaments={tournaments} config={config} onSaveTournament={handleSaveTournament}/>
-        :page==="settings"    ?<SettingsPage config={config} onSaveConfig={handleSaveConfig}/>
-        :modeId               ?<SessionPage modeId={modeId} sessions={sessions} mmrHistory={mmrHist} config={config} onSave={handleSave}/>
+        :page==="settings"    ?<SettingsPage config={config} onSaveConfig={handleSaveConfig} custom={custom} onSaveCustom={handleSaveCustom} mechanics={mechanics} onSaveMechanics={handleSaveMechanics} sessions={sessions} onUpdateSessions={(s)=>{setSessions(s);saveSessions(s);doSync(s,mmrHist,tournaments,config);}}/>
+        :modeId               ?<SessionPage modeId={modeId} sessions={sessions} mmrHistory={mmrHist} config={config} custom={custom} mechanics={mechanics} onSaveMechanics={handleSaveMechanics} onSave={handleSave}/>
         :null
       }
     </AppShell>
