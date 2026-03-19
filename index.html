@@ -173,7 +173,7 @@ function setAIKey(k){ localStorage.setItem(AIKEY, k); }
 
 async function generateSummary(prompt){
   const key = getAIKey();
-  if(!key) return null;
+  if(!key) return '__NO_KEY__';
   try{
     const res = await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
@@ -184,10 +184,13 @@ async function generateSummary(prompt){
         messages:[{role:'user',content:prompt}]
       })
     });
-    if(!res.ok) return null;
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      return '__ERROR__: '+(err?.error?.message||res.status);
+    }
     const data = await res.json();
     return data.content?.[0]?.text || null;
-  }catch{ return null; }
+  }catch(e){ return '__ERROR__: '+e.message; }
 }
 
 async function generateMatchSummary(match, mode, errors, hits){
@@ -204,6 +207,31 @@ Aciertos: ${hitList}${customHit?' + '+customHit:''}
 Mecánica trabajada: ${mec}
 Formato: 1 frase sobre lo positivo, 1 sobre lo negativo, 1 recomendación concreta. Sin emojis.`;
   return generateSummary(prompt);
+}
+
+async function generateBatchSummaries(sessions, onProgress){
+  const results = [];
+  for(let i=0; i<sessions.length; i++){
+    const s = sessions[i];
+    if(s.sessionSummary && !s.sessionSummary.startsWith('__')) { results.push(s); onProgress(i+1, sessions.length); continue; }
+    const mode = MODES.find(m=>m.id===s.modeId)||{name:s.modeName,group:'standard'};
+    const errors = getModeErrors(mode,{});
+    const hits = getModeHits(mode,{});
+    // Generate per-match summaries
+    const updatedMatches = [];
+    for(const m of s.matches){
+      if(m.summary && !m.summary.startsWith('__')){ updatedMatches.push(m); continue; }
+      const sum = await generateMatchSummary(m, mode, errors, hits);
+      updatedMatches.push({...m, summary: sum||null});
+    }
+    // Generate session summary
+    const sessionSum = await generateSessionSummary(updatedMatches, mode, errors, hits);
+    results.push({...s, matches: updatedMatches, sessionSummary: sessionSum||null});
+    onProgress(i+1, sessions.length);
+    // Small delay to avoid rate limiting
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return results;
 }
 
 async function generateSessionSummary(matches, mode, errors, hits){
@@ -227,6 +255,10 @@ function is1v1(id){ return id==="1v1"; }
 const TOURNAMENT_ROUNDS = ["Fase de Grupos","Ronda de 16","Cuartos de Final","Semifinal","Final","Gran Final"];
 
 const SKEY="rlt3_s", MKEY="rlt3_m", TKEY="rlt3_t", CKEY="rlt3_cfg", XKEY="rlt3_custom", MECKEY="rlt3_mec";
+function draftKey(modeId){ return 'rlt3_draft_'+modeId; }
+function saveDraft(modeId, data){ try{ localStorage.setItem(draftKey(modeId), JSON.stringify(data)); }catch{} }
+function loadDraft(modeId){ try{ const s=localStorage.getItem(draftKey(modeId)); return s?JSON.parse(s):null; }catch{ return null; } }
+function clearDraft(modeId){ try{ localStorage.removeItem(draftKey(modeId)); }catch{} }
 const today=new Date().toLocaleDateString("es-ES");
 
 const PLACEMENT_SESSIONS=[
@@ -398,7 +430,7 @@ const TIERS=[
   {label:"Bronze",                      range:[19,21],borderColor:"#CD7F32"},
 ];
 
-function SettingsPage({config,onSaveConfig,custom={},onSaveCustom,mechanics={},onSaveMechanics}){
+function SettingsPage({config,onSaveConfig,custom={},onSaveCustom,mechanics={},onSaveMechanics,sessions=[],onUpdateSessions}){
   const [activeTab,setActiveTab]=useState("rangos");
   const [draft,setDraft]=useState(()=>JSON.parse(JSON.stringify(config)));
   const [selMode,setSelMode]=useState(MODES[0].id);
@@ -429,7 +461,7 @@ function SettingsPage({config,onSaveConfig,custom={},onSaveCustom,mechanics={},o
       </div>
       {/* Tabs */}
       <div style={{display:"flex",gap:8,marginBottom:24,borderBottom:`1px solid ${C.border}`,paddingBottom:0}}>
-        {[["rangos","📊 Rangos MMR"],["items","✓ Errores & Aciertos"],["mecanicas","🎯 Mecánicas"]].map(([id,label])=>(
+        {[["rangos","📊 Rangos MMR"],["items","✓ Errores & Aciertos"],["mecanicas","🎯 Mecánicas"],["ia","🤖 IA"]].map(([id,label])=>(
           <button key={id} onClick={()=>setActiveTab(id)}
             style={{padding:"10px 18px",borderRadius:"8px 8px 0 0",border:`1px solid ${activeTab===id?C.border:"transparent"}`,borderBottom:activeTab===id?`2px solid ${C.blue}`:"1px solid transparent",background:activeTab===id?C.card:"none",color:activeTab===id?C.text:C.muted,fontSize:13,fontWeight:activeTab===id?700:400,cursor:"pointer",marginBottom:-1}}>
             {label}
@@ -630,6 +662,84 @@ function SettingsPage({config,onSaveConfig,custom={},onSaveCustom,mechanics={},o
         </Card>
       </>}
 
+      {/* TAB: IA */}
+      {activeTab==="ia"&&<IaTab sessions={sessions} onUpdateSessions={onUpdateSessions}/>}
+
+    </div>
+  );
+}
+
+function IaTab({sessions=[], onUpdateSessions}){
+  const [running,  setRunning]  = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const [total,    setTotal]    = React.useState(0);
+  const [done,     setDone]     = React.useState(false);
+  const [errMsg,   setErrMsg]   = React.useState('');
+  const hasKey = !!getAIKey();
+  const sessionsWithout = sessions.filter(s=>!s.sessionSummary||s.sessionSummary.startsWith('__')).length;
+
+  const runBatch = async () => {
+    if(!hasKey){ setErrMsg('Sin API Key. Confígurala en ⚙ Config → campo "API Key de Claude".'); return; }
+    setRunning(true); setDone(false); setErrMsg(''); setProgress(0); setTotal(sessions.length);
+    try{
+      const updated = await generateBatchSummaries(sessions, (done,tot)=>{ setProgress(done); setTotal(tot); });
+      onUpdateSessions&&onUpdateSessions(updated);
+      setDone(true);
+    }catch(e){ setErrMsg('Error: '+e.message); }
+    setRunning(false);
+  };
+
+  const pct = total>0?Math.round(progress/total*100):0;
+
+  return(
+    <div style={{maxWidth:540}}>
+      <Card style={{marginBottom:16}}>
+        <div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:6}}>🤖 Resúmenes IA en batch</div>
+        <div style={{fontSize:13,color:C.muted,lineHeight:1.7,marginBottom:20}}>
+          Genera resúmenes con Claude para todas tus sesiones y partidas existentes. Se guardan permanentemente.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:20}}>
+          {[["Total",sessions.length,C.text],["Sin resumen",sessionsWithout,C.amber],["Con resumen",sessions.length-sessionsWithout,C.green]].map(([l,v,col])=>(
+            <div key={l} style={{background:C.surface,borderRadius:8,padding:"12px",border:`1px solid ${C.border}`,textAlign:"center"}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:24,fontWeight:700,color:col}}>{v}</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:4}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        {!hasKey&&<div style={{background:`${C.amber}10`,border:`1px solid ${C.amber}30`,borderRadius:8,padding:"12px",fontSize:12,color:C.amber,marginBottom:16}}>
+          ⚠ Configura tu API Key de Claude primero. Cierra este modal → Sidebar → ⚙ Config → campo "API Key de Claude".
+        </div>}
+        {running&&<div style={{marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginBottom:6}}>
+            <span>Sesión {progress} de {total}...</span>
+            <span style={{color:C.blue,fontWeight:700}}>{pct}%</span>
+          </div>
+          <div style={{height:6,background:C.border,borderRadius:3,marginBottom:6}}>
+            <div style={{height:"100%",width:`${pct}%`,background:C.blue,borderRadius:3,transition:"width .4s"}}/>
+          </div>
+          <div style={{fontSize:11,color:C.muted}}>No cierres esta página mientras se genera...</div>
+        </div>}
+        {done&&!running&&<div style={{background:`${C.green}10`,border:`1px solid ${C.green}30`,borderRadius:8,padding:"12px",fontSize:13,color:C.green,marginBottom:16}}>
+          ✓ Completado. Resúmenes guardados en todas las sesiones — vélos en Estadísticas → detalle de sesión.
+        </div>}
+        {errMsg&&<div style={{background:`${C.red}10`,border:`1px solid ${C.red}30`,borderRadius:8,padding:"12px",fontSize:12,color:C.red,marginBottom:16}}>{errMsg}</div>}
+        <button onClick={runBatch} disabled={running||!hasKey||sessionsWithout===0}
+          style={{width:"100%",padding:"14px",borderRadius:10,border:"none",
+            background:running||!hasKey||sessionsWithout===0?C.border:C.blue,
+            color:running||!hasKey||sessionsWithout===0?C.muted:"#fff",
+            fontSize:14,fontWeight:700,cursor:running||!hasKey||sessionsWithout===0?"default":"pointer"}}>
+          {running?`⟳ Generando... ${progress}/${total}`:sessionsWithout===0?"✓ Todas las sesiones tienen resumen":`🤖 Generar para ${sessionsWithout} sesión${sessionsWithout!==1?"es":""}`}
+        </button>
+      </Card>
+      <Card>
+        <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:10}}>ℹ️ Cómo funciona</div>
+        <div style={{fontSize:12,color:C.muted,lineHeight:1.9}}>
+          • Por cada sesión: resumen completo (4 frases) + resumen por partida (3 frases)<br/>
+          • Las sesiones que ya tienen resumen se saltan automáticamente<br/>
+          • Usa Claude Haiku (rápido y económico)<br/>
+          • Al terminar sincroniza todo con JSONBin automáticamente
+        </div>
+      </Card>
     </div>
   );
 }
@@ -1150,6 +1260,9 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
 function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},onSaveMechanics,onSave}){
   const mode=MODES.find(m=>m.id===modeId),errors=getModeErrors(mode,custom),duel=is1v1(modeId);
   const latMMR=getLatestMMR(mmrHistory,modeId,mode.initMMR);
+  // Check for existing draft
+  const existingDraft=loadDraft(modeId);
+  const [showDraftBanner,setShowDraftBanner]=useState(!!existingDraft);
   const [step,setStep]=useState("setup"),[startMMR,setStartMMR]=useState(String(latMMR)),[focusErr,setFocusErr]=useState(null);
   const [matches,setMatches]=useState([]),[endMMR,setEndMMR]=useState(""),[currE,setCurrE]=useState({});
   const [currR,setCurrR]=useState(null),[scoreUs,setScoreUs]=useState(""),[scoreThem,setScoreThem]=useState("");
@@ -1187,6 +1300,9 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
     setCurrE({});setCurrH({});setCurrR(null);setScoreUs("");setScoreThem("");
     setMyGoals("");setMyAssists("");setMySaves("");
     setCustomHitLabel("");setCustomHitCount(0);setMecLabel("");setMecIntentos(0);setMecLogradas(0);setNewMecInput("");
+    // Auto-save draft after each match
+    const draft={step:"tracking",startMMR,focusErr,matches:[...matches,newMatch]};
+    saveDraft(modeId,draft);
     setMatchSummary(null);
     // Generate match summary async
     if(getAIKey()){
@@ -1204,8 +1320,45 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
     let sSum=null;
     if(getAIKey()){ sSum=await generateSessionSummary(matches,mode,errors,hits); setSessionSummary(sSum); }
     setLoadingSessionSummary(false);
+    clearDraft(modeId);
     onSave({id:Date.now(),date:new Date().toLocaleDateString("es-ES"),time:new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),modeId,modeName:mode.name,focusError:focusErr,startMMR:Number(startMMR)||null,endMMR:Number(endMMR)||null,matches,sessionSummary:sSum});
   };
+  // Draft banner — shown before setup if pending session exists
+  if(showDraftBanner&&existingDraft)return(
+    <div style={{padding:"32px",maxWidth:520,margin:"0 auto"}}>
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
+        <div style={{width:48,height:48,borderRadius:14,background:`${mode.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>{mode.icon}</div>
+        <div><h1 style={{fontSize:22,fontWeight:700,color:C.text}}>{mode.name}</h1><p style={{fontSize:13,color:C.muted}}>Sesión pendiente encontrada</p></div>
+      </div>
+      <div style={{background:`${C.amber}10`,border:`1px solid ${C.amber}40`,borderRadius:14,padding:"24px",marginBottom:20}}>
+        <div style={{fontSize:14,fontWeight:700,color:C.amber,marginBottom:12}}>📋 Tienes una sesión sin guardar</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
+          {[["Partidas",existingDraft.matches?.length||0,C.text],["Victorias",(existingDraft.matches||[]).filter(isWin).length,C.green],["MMR inicio",existingDraft.startMMR||"—",C.amber]].map(([l,v,col])=>(
+            <div key={l} style={{background:C.card,borderRadius:8,padding:"10px",textAlign:"center",border:`1px solid ${C.border}`}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col}}>{v}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:3}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <button onClick={()=>{
+            setStartMMR(existingDraft.startMMR||String(latMMR));
+            setFocusErr(existingDraft.focusErr||null);
+            setMatches(existingDraft.matches||[]);
+            setStep("tracking");
+            setShowDraftBanner(false);
+          }} style={{padding:"13px",borderRadius:10,border:"none",background:mode.color,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+            ▶ Continuar sesión
+          </button>
+          <button onClick={()=>{ clearDraft(modeId); setShowDraftBanner(false); }}
+            style={{padding:"13px",borderRadius:10,border:`1px solid ${C.border}`,background:"none",color:C.muted,fontSize:14,cursor:"pointer"}}>
+            ✕ Descartar y empezar nueva
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   if(step==="setup")return(
     <div style={{padding:"32px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28}}>
@@ -1338,9 +1491,13 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
             <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
             <div style={{marginTop:16}}><PrimaryBtn onClick={addMatch} color={mode.color} disabled={!currR}>✓ Guardar partida {matches.length+1}</PrimaryBtn></div>
             {loadingSummary&&<div style={{marginTop:10,padding:"8px 12px",background:`${C.amber}10`,borderRadius:8,fontSize:12,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA...</div>}
-            {matchSummary&&!loadingSummary&&<div style={{marginTop:10,padding:"12px",background:`${C.blue}10`,border:`1px solid ${C.blue}30`,borderRadius:8,fontSize:12,color:C.sub,lineHeight:1.7}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.blue,marginBottom:6}}>💬 Análisis IA — Última partida</div>
-              {matchSummary}
+            {matchSummary&&!loadingSummary&&<div style={{marginTop:10,padding:"12px",
+              background:matchSummary.startsWith('__')?`${C.red}10`:`${C.blue}10`,
+              border:`1px solid ${matchSummary.startsWith('__')?C.red:C.blue}30`,borderRadius:8,fontSize:12,color:C.sub,lineHeight:1.7}}>
+              <div style={{fontSize:11,fontWeight:700,color:matchSummary.startsWith('__')?C.red:C.blue,marginBottom:6}}>
+                {matchSummary.startsWith('__NO_KEY__')?'⚠ Sin API Key — configúrala en ⚙ Config':matchSummary.startsWith('__ERROR__')?'✕ Error IA: '+matchSummary.replace('__ERROR__: ',''):'💬 Análisis IA — Última partida'}
+              </div>
+              {!matchSummary.startsWith('__')&&matchSummary}
             </div>}
           </Card>
         </div>
@@ -1494,16 +1651,20 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
               {[["Inicio",startMMR,C.muted],["Final",endMMR,C.text],["Cambio",(mmrDelta>=0?"+":"")+mmrDelta,mmrDelta>=0?C.green:C.red]].map(([l,v,col])=><div key={l}><div style={{fontSize:11,color:C.muted}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:col}}>{v}</div></div>)}
             </div>}
           </Card>
-          {loadingSessionSummary&&<div style={{padding:"10px 12px",background:`${C.amber}10`,borderRadius:8,fontSize:12,color:C.amber,textAlign:"center",marginBottom:8}}>⟳ Generando resumen IA de sesión...</div>}
-          {sessionSummary&&<div style={{padding:"14px",background:`${C.blue}10`,border:`1px solid ${C.blue}30`,borderRadius:10,fontSize:13,color:C.sub,lineHeight:1.8,marginBottom:8}}>
-            <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:8}}>💬 Análisis IA — Sesión completa</div>
-            {sessionSummary}
-          </div>}
           <PrimaryBtn onClick={saveSession} color={mode.color} disabled={loadingSessionSummary}>
             {loadingSessionSummary?"⟳ Analizando...":"💾 Guardar sesión"}
           </PrimaryBtn>
         </div>
       </div>
+      {/* Session summary — full width below grid */}
+      {loadingSessionSummary&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.amber}10`,border:`1px solid ${C.amber}30`,borderRadius:10,fontSize:13,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA de sesión...</div>}
+      {sessionSummary&&!sessionSummary.startsWith('__')&&<div style={{marginTop:16,padding:"20px 24px",background:`${C.blue}08`,border:`1px solid ${C.blue}30`,borderRadius:12,lineHeight:1.9}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:10,textTransform:"uppercase",letterSpacing:.8}}>💬 Análisis IA — Sesión completa</div>
+        <div style={{fontSize:14,color:C.sub}}>{sessionSummary}</div>
+      </div>}
+      {sessionSummary&&sessionSummary.startsWith('__ERROR__')&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.red}10`,border:`1px solid ${C.red}30`,borderRadius:10,fontSize:12,color:C.red}}>
+        ✕ Error IA: {sessionSummary.replace('__ERROR__: ','')}
+      </div>}
     </div>
   );
 }
@@ -1968,7 +2129,7 @@ function App(){
         :page==="home"        ?<HomePage sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config} onNavigate={setPage} onEditMMR={m=>setMmrModal(m)}/>
         :page==="stats"       ?<StatsPage sessions={sessions} mmrHistory={mmrHist} config={config} onViewSession={s=>setViewSess(s)}/>
         :page==="tournaments" ?<TournamentPage sessions={sessions} tournaments={tournaments} config={config} onSaveTournament={handleSaveTournament}/>
-        :page==="settings"    ?<SettingsPage config={config} onSaveConfig={handleSaveConfig} custom={custom} onSaveCustom={handleSaveCustom} mechanics={mechanics} onSaveMechanics={handleSaveMechanics}/>
+        :page==="settings"    ?<SettingsPage config={config} onSaveConfig={handleSaveConfig} custom={custom} onSaveCustom={handleSaveCustom} mechanics={mechanics} onSaveMechanics={handleSaveMechanics} sessions={sessions} onUpdateSessions={(s)=>{setSessions(s);saveSessions(s);doSync(s,mmrHist,tournaments,config);}}/>
         :modeId               ?<SessionPage modeId={modeId} sessions={sessions} mmrHistory={mmrHist} config={config} custom={custom} mechanics={mechanics} onSaveMechanics={handleSaveMechanics} onSave={handleSave}/>
         :null
       }
