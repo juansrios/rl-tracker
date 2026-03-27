@@ -966,7 +966,7 @@ function ImportExportModal({ onClose, onImport }) {
   );
 }
 
-function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg}){
+function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,playerName,custom,mechanics,onSaveCustom,onSaveMechanics}){
   const [open,setOpen]=useState(true);
   const [mobile,setMobile]=useState(window.innerWidth<=768);
   React.useEffect(()=>{
@@ -2457,7 +2457,7 @@ function App(){
   return(
     <AppShell activePage={page} onNavigate={p=>{setPage(p);setViewSess(null);}} sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config}
       syncStatus={syncStatus} syncLabel={syncLabel} syncColor={syncColor} lastSync={lastSync}
-      onOpenCloud={()=>setShowCloud(true)} onOpenImport={()=>setShowImport(true)} onPullNow={handlePullNow} cloudCfg={cloudCfg}
+      onOpenCloud={()=>setShowCloud(true)} onOpenImport={()=>setShowImport(true)} onPullNow={handlePullNow} cloudCfg={cloudCfg} playerName={playerName}
       custom={custom} mechanics={mechanics} onSaveCustom={handleSaveCustom} onSaveMechanics={handleSaveMechanics}>
       {mmrModal&&<MMREditModal mode={mmrModal} currentMMR={getLatestMMR(mmrHist,mmrModal.id,mmrModal.initMMR)} config={config} onSave={mmr=>handleSaveMMR(mmrModal,mmr)} onClose={()=>setMmrModal(null)}/>}
       {showCloud&&<CloudConfigModal onClose={()=>setShowCloud(false)} onSaved={()=>{setSyncStatus('idle');doInit();}}/>}
