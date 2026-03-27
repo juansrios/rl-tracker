@@ -979,7 +979,7 @@ function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournament
       {mobile&&<div className={`overlay${open?' active':''}`} onClick={()=>setOpen(false)}/>}
       <Sidebar activePage={activePage} onNavigate={onNavigate} sessions={sessions} mmrHistory={mmrHistory} tournaments={tournaments} config={config}
         syncStatus={syncStatus} syncLabel={syncLabel} syncColor={syncColor} lastSync={lastSync} onOpenCloud={onOpenCloud} onOpenImport={onOpenImport} onPullNow={onPullNow} cloudCfg={cloudCfg}
-        open={open} mobile={mobile} onClose={()=>setOpen(false)}/>
+        open={open} mobile={mobile} onClose={()=>setOpen(false)} playerName={playerName}/>
       <div style={{flex:1,overflow:"auto",marginLeft:mobile?0:0,minWidth:0}}>
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:C.surface,borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,zIndex:50}}>
           <button onClick={()=>setOpen(o=>!o)}
@@ -999,7 +999,7 @@ function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournament
   );
 }
 
-function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose}){
+function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose,playerName}){
   const w=mobile?(open?280:0):(open?240:64);
   const nav=(p)=>{onNavigate(p);if(mobile)onClose();};
   if(mobile&&!open)return null;
