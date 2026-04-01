@@ -1232,14 +1232,24 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
         ))}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:20}}>
-        {src.sessionSummary&&<Card style={{borderColor:`${C.blue}30`,marginBottom:14}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:8}}>💬 Análisis IA — Resumen de sesión</div>
-          <div style={{fontSize:13,color:C.sub,lineHeight:1.9}}>
-            {(cleanSummary(src.sessionSummary)||'').split('\n').filter(l=>l.trim()).map((line,i)=>(
-              <div key={i} style={{marginBottom:6}}>{line}</div>
-            ))}
-          </div>
-        </Card>}
+        {src.sessionSummary&&!src.sessionSummary.startsWith('__')&&(()=>{
+          const [open,setOpen]=React.useState(false);
+          const clean=cleanSummary(src.sessionSummary)||'';
+          return(
+            <div style={{marginBottom:14}}>
+              <button onClick={()=>setOpen(o=>!o)}
+                style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:open?`${C.blue}15`:C.card,border:`1px solid ${open?C.blue:C.border}`,borderRadius:open?"10px 10px 0 0":10,cursor:"pointer",textAlign:"left"}}>
+                <span style={{fontSize:12,fontWeight:700,color:C.blue,flex:1}}>💬 Análisis IA — Resumen de sesión</span>
+                <span style={{fontSize:11,color:C.muted}}>{open?"▲ Cerrar":"▼ Ver resumen"}</span>
+              </button>
+              {open&&<div style={{background:`${C.blue}08`,border:`1px solid ${C.blue}`,borderTop:"none",borderRadius:"0 0 10px 10px",padding:"14px 16px"}}>
+                {clean.split('\n').filter(l=>l.trim()).map((line,i)=>(
+                  <div key={i} style={{fontSize:13,color:C.sub,lineHeight:1.8,marginBottom:6,paddingLeft:line.startsWith('•')?8:0}}>{line}</div>
+                ))}
+              </div>}
+            </div>
+          );
+        })()}
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <div style={{fontSize:14,fontWeight:600,color:C.sub}}>Historial de partidas</div>
@@ -1276,11 +1286,22 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
                 </div>
                 {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingBottom:4,paddingLeft:36}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
                 {m.mecanica?.label&&<div style={{paddingLeft:36,paddingBottom:4,fontSize:11,color:C.blue}}>🎯 {m.mecanica.label}: <strong>{m.mecanica.logradas}/{m.mecanica.intentos}</strong> ({m.mecanica.intentos>0?Math.round(m.mecanica.logradas/m.mecanica.intentos*100):0}%)</div>}
-                {m.summary&&!m.summary.startsWith('__')&&<div style={{marginLeft:36,marginBottom:6,padding:"8px 10px",background:`${C.blue}08`,borderRadius:6,fontSize:11,color:C.sub,lineHeight:1.7,borderLeft:`2px solid ${C.blue}40`}}>
-  {(cleanSummary(m.summary)||'').split('\n').filter(l=>l.trim()).map((line,i)=>(
-    <span key={i}>{line} </span>
-  ))}
-</div>}
+                {m.summary&&!m.summary.startsWith('__')&&(()=>{
+  const [showM,setShowM]=React.useState(false);
+  return(
+    <div style={{marginLeft:36,marginBottom:6}}>
+      <button onClick={()=>setShowM(o=>!o)}
+        style={{background:"none",border:`1px solid ${showM?C.blue:C.border}`,borderRadius:6,padding:"2px 8px",fontSize:10,color:showM?C.blue:C.muted,cursor:"pointer"}}>
+        💬 {showM?"Cerrar":"Ver análisis"}
+      </button>
+      {showM&&<div style={{marginTop:6,padding:"8px 10px",background:`${C.blue}08`,borderRadius:6,fontSize:11,color:C.sub,lineHeight:1.7,borderLeft:`2px solid ${C.blue}40`}}>
+        {(cleanSummary(m.summary)||'').split('\n').filter(l=>l.trim()).map((line,i)=>(
+          <div key={i} style={{marginBottom:3}}>{line}</div>
+        ))}
+      </div>}
+    </div>
+  );
+})()}
               </div>
             );
           })}
@@ -1581,20 +1602,27 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
             <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
             <div style={{marginTop:16}}><PrimaryBtn onClick={addMatch} color={mode.color} disabled={!currR}>✓ Guardar partida {matches.length+1}</PrimaryBtn></div>
             {loadingSummary&&<div style={{marginTop:10,padding:"8px 12px",background:`${C.amber}10`,borderRadius:8,fontSize:12,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA...</div>}
-            {matchSummary&&!loadingSummary&&<div style={{marginTop:10,padding:"12px",
-              background:matchSummary.startsWith('__')?`${C.red}10`:`${C.blue}10`,
-              border:`1px solid ${matchSummary.startsWith('__')?C.red:C.blue}30`,borderRadius:8,fontSize:12,color:C.sub,lineHeight:1.7}}>
-              <div style={{fontSize:11,fontWeight:700,color:matchSummary.startsWith('__')?C.red:C.blue,marginBottom:6}}>
-                {matchSummary.startsWith('__NO_KEY__')?'⚠ Sin API Key — configúrala en ⚙ Config':matchSummary.startsWith('__ERROR__')?'✕ Error IA: '+matchSummary.replace('__ERROR__: ',''):'💬 Análisis IA — Última partida'}
-              </div>
-              {!matchSummary.startsWith('__')&&(
-                <div>
-                  {matchSummary.split('\n').filter(l=>l.trim()).map((line,i)=>(
-                    <div key={i} style={{marginBottom:4}}>{line}</div>
-                  ))}
+            {matchSummary&&!loadingSummary&&(()=>{
+              if(matchSummary.startsWith('__'))return(
+                <div style={{marginTop:8,padding:"8px 12px",background:matchSummary.startsWith('__NO_KEY__')?`${C.amber}10`:`${C.red}10`,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,color:matchSummary.startsWith('__NO_KEY__')?C.amber:C.red}}>
+                  {matchSummary.startsWith('__NO_KEY__')?'⚠ Sin API Key':'✕ '+matchSummary.replace('__ERROR__: ','')}
                 </div>
-              )}
-            </div>}
+              );
+              const [showLast,setShowLast]=React.useState(false);
+              return(
+                <div style={{marginTop:8}}>
+                  <button onClick={()=>setShowLast(o=>!o)}
+                    style={{background:"none",border:`1px solid ${showLast?C.blue:C.border}`,borderRadius:8,padding:"5px 12px",fontSize:11,color:showLast?C.blue:C.muted,cursor:"pointer",width:"100%"}}>
+                    💬 {showLast?"Cerrar análisis":"Ver análisis de la partida"}
+                  </button>
+                  {showLast&&<div style={{marginTop:6,padding:"10px 12px",background:`${C.blue}10`,border:`1px solid ${C.blue}30`,borderRadius:8,fontSize:11,color:C.sub,lineHeight:1.7}}>
+                    {(cleanSummary(matchSummary)||'').split('\n').filter(l=>l.trim()).map((line,i)=>(
+                      <div key={i} style={{marginBottom:3}}>{line}</div>
+                    ))}
+                  </div>}
+                </div>
+              );
+            })()}
           </Card>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -1885,14 +1913,24 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
       </div>
       {/* Session summary — full width below grid */}
       {loadingSessionSummary&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.amber}10`,border:`1px solid ${C.amber}30`,borderRadius:10,fontSize:13,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA de sesión...</div>}
-      {sessionSummary&&!sessionSummary.startsWith('__')&&<div style={{marginTop:16,padding:"20px 24px",background:`${C.blue}08`,border:`1px solid ${C.blue}30`,borderRadius:12,lineHeight:1.9}}>
-        <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:10,textTransform:"uppercase",letterSpacing:.8}}>💬 Análisis IA — Sesión completa</div>
-        <div style={{fontSize:14,color:C.sub,lineHeight:1.9}}>
-          {sessionSummary.split('\n').filter(l=>l.trim()).map((line,i)=>(
-            <div key={i} style={{marginBottom:line.startsWith('•')?4:8}}>{line}</div>
-          ))}
-        </div>
-      </div>}
+      {sessionSummary&&!sessionSummary.startsWith('__')&&(()=>{
+        const [openS,setOpenS]=React.useState(false);
+        const cleanS=cleanSummary(sessionSummary)||'';
+        return(
+          <div style={{marginTop:16}}>
+            <button onClick={()=>setOpenS(o=>!o)}
+              style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"12px 16px",background:openS?`${C.blue}15`:C.card,border:`1px solid ${openS?C.blue:C.border}`,borderRadius:openS?"10px 10px 0 0":10,cursor:"pointer"}}>
+              <span style={{fontSize:12,fontWeight:700,color:C.blue,flex:1}}>💬 Análisis IA — Sesión completa</span>
+              <span style={{fontSize:11,color:C.muted}}>{openS?"▲ Cerrar":"▼ Ver resumen"}</span>
+            </button>
+            {openS&&<div style={{background:`${C.blue}08`,border:`1px solid ${C.blue}`,borderTop:"none",borderRadius:"0 0 10px 10px",padding:"16px 18px"}}>
+              {cleanS.split('\n').filter(l=>l.trim()).map((line,i)=>(
+                <div key={i} style={{fontSize:13,color:C.sub,lineHeight:1.8,marginBottom:6}}>{line}</div>
+              ))}
+            </div>}
+          </div>
+        );
+      })()}
       {sessionSummary&&sessionSummary.startsWith('__ERROR__')&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.red}10`,border:`1px solid ${C.red}30`,borderRadius:10,fontSize:12,color:C.red}}>
         ✕ Error IA: {sessionSummary.replace('__ERROR__: ','')}
       </div>}
