@@ -1290,7 +1290,7 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
           <Card key={l} style={{padding:"12px 14px"}}><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:.7,marginBottom:4}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{v}</div></Card>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:20}}>
+      <div style={{display:"flex",flexDirection:"column",gap:16}}>
         {src.sessionSummary&&!src.sessionSummary.startsWith('__')&&
           <CollapsibleSummary summary={src.sessionSummary} label="💬 Análisis IA — Resumen de sesión"/>}
         <HistorialSection count={src.matches.length} editing={editing}>
@@ -1331,7 +1331,6 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
             );
           })}
         </HistorialSection>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
           <Card>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Errores de la sesión</div>
             {errors.map(e=>{const tot=totE[e.id]||0,isFocus=src.focusError===e.id;return(
@@ -1349,8 +1348,8 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
               ))}
             </div>
           </Card>}
-        </div>
       </div>
+
     </div>
   );
 }
