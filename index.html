@@ -1250,9 +1250,19 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
             </div>
           );
         })()}
-        <Card>
+        {(()=>{
+          const [openH,setOpenH]=React.useState(true);
+          return(
+          <div>
+            <button onClick={()=>setOpenH(o=>!o)}
+              style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"12px 16px",background:openH?C.hover:C.card,border:`1px solid ${C.border}`,borderRadius:openH?"10px 10px 0 0":10,cursor:"pointer",marginBottom:0}}>
+              <span style={{fontSize:14,fontWeight:600,color:C.sub,flex:1}}>📋 Historial de partidas ({src.matches.length})</span>
+              {editing&&<span style={{fontSize:11,color:C.amber}}>✏️ Edición activa</span>}
+              <span style={{fontSize:11,color:C.muted}}>{openH?"▲ Cerrar":"▼ Ver partidas"}</span>
+            </button>
+            {openH&&<Card style={{borderRadius:"0 0 10px 10px",borderTop:"none"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-            <div style={{fontSize:14,fontWeight:600,color:C.sub}}>Historial de partidas</div>
+            <div style={{fontSize:13,fontWeight:600,color:C.muted}}>{src.matches.length} partidas</div>
             {editing&&<span style={{fontSize:11,color:C.amber}}>✏️ Edición activa</span>}
           </div>
           {src.matches.map((m,i)=>{
@@ -1305,7 +1315,10 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
               </div>
             );
           })}
-        </Card>
+        </Card>}
+          </div>
+          );
+        })()}
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           <Card>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Errores de la sesión</div>
