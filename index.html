@@ -1334,7 +1334,7 @@ function AddMatchToSession({session, mode, errors, hits, duel, onSave}){
 
 function SessionDetailPage({session,config,custom={},onBack,onUpdateSession}){
   const mode=MODES.find(m=>m.id===session.modeId)||{name:session.modeName,color:C.blue,icon:"🎮"};
-  const errors=getModeErrors(mode),duel=is1v1(session.modeId);
+  const errors=getModeErrors(mode,custom),hits=getModeHits(mode,custom),duel=is1v1(session.modeId);
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(null);
   const startEdit=()=>{setDraft(JSON.parse(JSON.stringify(session)));setEditing(true);};
   const cancelEdit=()=>{setDraft(null);setEditing(false);};
