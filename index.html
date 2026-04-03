@@ -1189,24 +1189,6 @@ function CollapsibleSummary({summary, label}){
   );
 }
 
-function MatchSummaryToggle({summary}){
-  const [show,setShow]=useState(false);
-  const clean=cleanSummary(summary)||'';
-  return(
-    <div style={{marginLeft:36,marginBottom:6}}>
-      <button onClick={()=>setShow(o=>!o)}
-        style={{background:"none",border:`1px solid ${show?"#5865F2":"#2e3050"}`,borderRadius:6,padding:"2px 8px",fontSize:10,color:show?"#5865F2":"#72767d",cursor:"pointer"}}>
-        💬 {show?"Cerrar":"Ver análisis"}
-      </button>
-      {show&&<div style={{marginTop:6,padding:"8px 10px",background:"rgba(88,101,242,0.05)",borderRadius:6,fontSize:11,color:"#b9bbbe",lineHeight:1.7,borderLeft:"2px solid rgba(88,101,242,0.4)"}}>
-        {clean.split('\n').filter(l=>l.trim()).map((line,i)=>(
-          <div key={i} style={{marginBottom:3}}>{line}</div>
-        ))}
-      </div>}
-    </div>
-  );
-}
-
 function HistorialSection({count, editing, children}){
   const [open,setOpen]=useState(true);
   return(
@@ -1226,7 +1208,131 @@ function HistorialSection({count, editing, children}){
   );
 }
 
-function SessionDetailPage({session,config,onBack,onUpdateSession}){
+function AddMatchToSession({session, mode, errors, hits, duel, onSave}){
+  const [open, setOpen] = useState(false);
+  const [currE, setCurrE] = useState({});
+  const [currH, setCurrH] = useState({});
+  const [currR, setCurrR] = useState(null);
+  const [scoreUs, setScoreUs] = useState("");
+  const [scoreThem, setScoreThem] = useState("");
+  const [myGoals, setMyGoals] = useState("");
+  const [myAssists, setMyAssists] = useState("");
+  const [mySaves, setMySaves] = useState("");
+  const [mecLabel, setMecLabel] = useState("");
+  const [mecIntentos, setMecIntentos] = useState(0);
+  const [mecLogradas, setMecLogradas] = useState(0);
+
+  const reset = () => {
+    setCurrE({}); setCurrH({}); setCurrR(null);
+    setScoreUs(""); setScoreThem("");
+    setMyGoals(""); setMyAssists(""); setMySaves("");
+    setMecLabel(""); setMecIntentos(0); setMecLogradas(0);
+  };
+
+  const save = () => {
+    if(!currR) return;
+    const score = scoreUs!==""&&scoreThem!==""?{us:Number(scoreUs),them:Number(scoreThem)}:null;
+    const mecanica = mecLabel?{label:mecLabel,intentos:mecIntentos,logradas:mecLogradas}:null;
+    const newMatch = {id:Date.now(),result:currR,errors:{...currE},hits:{...currH},
+      score, mecanica, customHit:null, summary:null,
+      myGoals:!duel&&myGoals!==""?Number(myGoals):null,
+      myAssists:!duel&&myAssists!==""?Number(myAssists):null,
+      mySaves:!duel&&mySaves!==""?Number(mySaves):null};
+    onSave(newMatch);
+    reset();
+    setOpen(false);
+  };
+
+  const currEtot = Object.values(currE).reduce((a,b)=>a+b,0);
+
+  return(
+    <div style={{marginBottom:16}}>
+      <button onClick={()=>{setOpen(o=>!o);reset();}}
+        style={{display:"flex",alignItems:"center",gap:8,padding:"10px 16px",
+          background:open?`${mode.color}15`:C.card,
+          border:`1px solid ${open?mode.color:C.border}`,
+          borderRadius:open?"10px 10px 0 0":"10px",cursor:"pointer",width:"100%"}}>
+        <span style={{fontSize:13,fontWeight:600,color:open?mode.color:C.sub,flex:1}}>+ Añadir partida a esta sesión</span>
+        <span style={{fontSize:11,color:C.muted}}>{open?"▲ Cancelar":"▼ Abrir"}</span>
+      </button>
+      {open&&<div style={{background:C.card,border:`1px solid ${mode.color}`,borderTop:"none",borderRadius:"0 0 10px 10px",padding:"20px"}}>
+        {/* Result */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Resultado</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+            {[["win","Victoria",C.green],["mvp","MVP 👑",C.amber],["loss","Derrota",C.red],["draw","Empate","#7289da"]].map(([v,l,col])=>(
+              <button key={v} onClick={()=>setCurrR(currR===v?null:v)}
+                style={{padding:"10px 4px",borderRadius:8,border:`1.5px solid ${currR===v?col:C.border}`,background:currR===v?`${col}15`:"none",color:currR===v?col:C.sub,fontSize:13,fontWeight:currR===v?700:400}}>{l}</button>
+            ))}
+          </div>
+        </div>
+        {/* Score + personal stats */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Marcador (opcional)</div>
+          <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
+        </div>
+        {/* Errors */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.red,fontWeight:600,marginBottom:8}}>Errores {currEtot>0&&<span style={{color:C.text}}>({currEtot})</span>}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {errors.map(e=>{const cnt=currE[e.id]||0;return(
+              <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.surface,borderRadius:8,border:`1px solid ${cnt>0?`${C.red}40`:C.border}`}}>
+                <span style={{fontSize:11,color:C.muted,flex:1}}>{e.label}</span>
+                <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                  <button onClick={()=>setCurrE(p=>({...p,[e.id]:Math.max(0,(p[e.id]||0)-1)}))} disabled={cnt===0} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:cnt>0?C.text:C.muted,minWidth:16,textAlign:"center"}}>{cnt}</span>
+                  <button onClick={()=>setCurrE(p=>({...p,[e.id]:(p[e.id]||0)+1}))} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.red}40`,background:`${C.red}15`,color:C.red,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+        {/* Hits */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.green,fontWeight:600,marginBottom:8}}>Aciertos</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {hits.map(h=>{const cnt=currH[h.id]||0;return(
+              <div key={h.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.surface,borderRadius:8,border:`1px solid ${cnt>0?`${C.green}40`:C.border}`}}>
+                <span style={{fontSize:11,color:C.muted,flex:1}}>{h.label}</span>
+                <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                  <button onClick={()=>setCurrH(p=>({...p,[h.id]:Math.max(0,(p[h.id]||0)-1)}))} disabled={cnt===0} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:cnt>0?C.green:C.muted,minWidth:16,textAlign:"center"}}>{cnt}</span>
+                  <button onClick={()=>setCurrH(p=>({...p,[h.id]:(p[h.id]||0)+1}))} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.green}40`,background:`${C.green}15`,color:C.green,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+        {/* Mecánica */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.blue,fontWeight:600,marginBottom:8}}>Mecánica (opcional)</div>
+          <input value={mecLabel} onChange={e=>setMecLabel(e.target.value)} placeholder="Ej: Aerial doble toque..."
+            style={{width:"100%",background:C.surface,border:`1px solid ${mecLabel?`${C.blue}40`:C.border}`,borderRadius:8,padding:"8px 12px",color:C.text,fontSize:12,outline:"none",marginBottom:mecLabel?8:0}}/>
+          {mecLabel&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+            {[["Intentos",mecIntentos,setMecIntentos,C.sub],["Logradas",mecLogradas,setMecLogradas,C.blue]].map(([label,val,setter,col])=>(
+              <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.surface,borderRadius:8,border:`1px solid ${C.border}`}}>
+                <span style={{fontSize:11,color:C.muted}}>{label}</span>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <button onClick={()=>setter(p=>Math.max(0,p-1))} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:col}}>{val}</span>
+                  <button onClick={()=>setter(p=>p+1)} style={{width:22,height:22,borderRadius:4,border:`1px solid ${col}40`,background:`${col}15`,color:col,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>}
+        </div>
+        <button onClick={save} disabled={!currR}
+          style={{width:"100%",padding:"12px",borderRadius:10,border:"none",
+            background:currR?mode.color:C.border,color:currR?"#fff":C.muted,
+            fontSize:14,fontWeight:700,cursor:currR?"pointer":"default"}}>
+          ✓ Guardar partida
+        </button>
+      </div>}
+    </div>
+  );
+}
+
+function SessionDetailPage({session,config,custom={},onBack,onUpdateSession}){
   const mode=MODES.find(m=>m.id===session.modeId)||{name:session.modeName,color:C.blue,icon:"🎮"};
   const errors=getModeErrors(mode),duel=is1v1(session.modeId);
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(null);
@@ -1325,12 +1431,17 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
                 </div>
                 {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingBottom:4,paddingLeft:36}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
                 {m.mecanica?.label&&<div style={{paddingLeft:36,paddingBottom:4,fontSize:11,color:C.blue}}>🎯 {m.mecanica.label}: <strong>{m.mecanica.logradas}/{m.mecanica.intentos}</strong> ({m.mecanica.intentos>0?Math.round(m.mecanica.logradas/m.mecanica.intentos*100):0}%)</div>}
-                {m.summary&&!m.summary.startsWith('__')&&
-  <MatchSummaryToggle summary={m.summary}/>}
+                
               </div>
             );
           })}
         </HistorialSection>
+          <AddMatchToSession
+            session={src} mode={mode} errors={errors} hits={hits} duel={duel}
+            onSave={(newMatch)=>{
+              const updated={...src,matches:[...src.matches,newMatch]};
+              onUpdateSession(updated);
+            }}/>
           <Card>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Errores de la sesión</div>
             {errors.map(e=>{const tot=totE[e.id]||0,isFocus=src.focusError===e.id;return(
@@ -1371,8 +1482,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
   const [mecIntentos,setMecIntentos]=useState(0);
   const [mecLogradas,setMecLogradas]=useState(0);
   const [newMecInput,setNewMecInput]=useState("");
-  const [matchSummary,setMatchSummary]=useState(null);
-  const [loadingSummary,setLoadingSummary]=useState(false);
+
   const [sessionSummary,setSessionSummary]=useState(null);
   const [loadingSessionSummary,setLoadingSessionSummary]=useState(false);
   const [editingMatchIdx,setEditingMatchIdx]=useState(null);
@@ -1417,16 +1527,6 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
     // Auto-save draft after each match (clear inProgress since match is now saved)
     saveDraft(modeId,{step:"tracking",startMMR,focusErr,matches:[...matches,newMatch],inProgress:null});
     setMatchSummary(null);
-    // Generate match summary async
-    if(getAIKey()){
-      setLoadingSummary(true);
-      const summary=await generateMatchSummary(newMatch,mode,errors,hits);
-      if(summary){
-        setMatchSummary(summary);
-        setMatches(p=>p.map(m=>m.id===newMatch.id?{...m,summary}:m));
-      }
-      setLoadingSummary(false);
-    }
   };
   const saveSession=async()=>{
     setLoadingSessionSummary(true);
@@ -1625,14 +1725,8 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
             <div style={{fontSize:12,fontWeight:600,color:C.sub,marginBottom:10}}>Estadísticas <span style={{color:C.muted,fontWeight:400}}>(opcional)</span></div>
             <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
             <div style={{marginTop:16}}><PrimaryBtn onClick={addMatch} color={mode.color} disabled={!currR}>✓ Guardar partida {matches.length+1}</PrimaryBtn></div>
-            {loadingSummary&&<div style={{marginTop:10,padding:"8px 12px",background:`${C.amber}10`,borderRadius:8,fontSize:12,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA...</div>}
-            {matchSummary&&!loadingSummary&&(
-              matchSummary.startsWith('__')
-                ?<div style={{marginTop:8,padding:"8px 12px",background:matchSummary.startsWith('__NO_KEY__')?`${C.amber}10`:`${C.red}10`,border:`1px solid ${C.border}`,borderRadius:8,fontSize:11,color:matchSummary.startsWith('__NO_KEY__')?C.amber:C.red}}>
-                  {matchSummary.startsWith('__NO_KEY__')?'⚠ Sin API Key':'✕ '+matchSummary.replace('__ERROR__: ','')}
-                </div>
-                :<div style={{marginTop:8}}><MatchSummaryToggle summary={matchSummary}/></div>
-            )}
+
+
           </Card>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -2421,7 +2515,7 @@ function App(){
       {showCloud&&<CloudConfigModal onClose={()=>setShowCloud(false)} onSaved={()=>{setSyncStatus('idle');doInit();}}/>}
       {showImport&&<ImportExportModal onClose={()=>setShowImport(false)} onImport={handleImport}/>}
       {viewSess
-        ?<SessionDetailPage session={viewSess} config={config} onBack={()=>setViewSess(null)} onUpdateSession={handleUpdateSession}/>
+        ?<SessionDetailPage session={viewSess} config={config} custom={custom} onBack={()=>setViewSess(null)} onUpdateSession={handleUpdateSession}/>
         :page==="home"        ?<HomePage sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config} onNavigate={setPage} onEditMMR={m=>setMmrModal(m)}/>
         :page==="stats"       ?<StatsPage sessions={sessions} mmrHistory={mmrHist} config={config} custom={custom} onViewSession={s=>setViewSess(s)}/>
         :page==="tournaments" ?<TournamentPage sessions={sessions} tournaments={tournaments} config={config} onSaveTournament={handleSaveTournament}/>
