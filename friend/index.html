@@ -171,6 +171,17 @@ const AIKEY = 'rlt3f_aikey';
 function getAIKey(){ try{ return localStorage.getItem(AIKEY)||''; }catch{ return ''; } }
 function setAIKey(k){ localStorage.setItem(AIKEY, k); }
 
+function cleanSummary(text){
+  if(!text) return text;
+  return text
+    .replace(/^#{1,3} /gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^[-*] /gm, '• ')
+    .split('\n').filter(l=>l.trim()).join('\n')
+    .trim();
+}
+
 async function generateSummary(prompt){
   const key = getAIKey();
   if(!key) return '__NO_KEY__';
@@ -189,7 +200,7 @@ async function generateSummary(prompt){
       return '__ERROR__: '+(err?.error?.message||res.status);
     }
     const data = await res.json();
-    return data.content?.[0]?.text || null;
+    return cleanSummary(data.content?.[0]?.text) || null;
   }catch(e){ return '__ERROR__: '+e.message; }
 }
 
@@ -872,7 +883,7 @@ function CloudConfigModal({ onClose, onSaved }) {
 
         <div style={{marginBottom:20}}>
           <div style={{fontSize:12,color:C.muted,marginBottom:6}}>🤖 API Key de Claude (para resúmenes IA — opcional)</div>
-          <input value={aiKeyVal} onChange={e=>setAiKeyVal(e.target.value)} placeholder="sk-ant-..."
+          <input value={aiKeyVal} onChange={e=>setAiKeyVal(e.target.value)} placeholder="Pegar API Key..."
             style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:12,width:'100%',fontFamily:'monospace'}}/>
           <div style={{fontSize:11,color:C.muted,marginTop:4}}>Necesaria para los resúmenes automáticos por partida y sesión. Guárdala solo en este dispositivo.</div>
         </div>
@@ -999,7 +1010,7 @@ function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournament
   );
 }
 
-function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose,playerName}){
+function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose}){
   const w=mobile?(open?280:0):(open?240:64);
   const nav=(p)=>{onNavigate(p);if(mobile)onClose();};
   if(mobile&&!open)return null;
@@ -1092,7 +1103,7 @@ function HomePage({sessions,mmrHistory,tournaments,config,onNavigate,onEditMMR})
         {[{label:"Sesiones",value:sessions.length,color:C.blue},{label:"Partidas",value:totalMatches,color:C.green},{label:"Torneos",value:tournaments.length,color:C.orange},{label:"Modos activos",value:MODES.filter(m=>sessions.some(s=>s.modeId===m.id)).length,color:C.amber}]
           .map(item=><Card key={item.label}><StatBlock label={item.label} value={item.value} valueColor={item.color}/></Card>)}
       </div>
-      {[["standard","Modos Estándar","repeat(3,1fr)"],["special","Modos Especiales","repeat(5,1fr)"]].map(([group,label,cols])=>(
+      {[["standard","Modos Estándar","repeat(auto-fill,minmax(260px,1fr))"],["special","Modos Especiales","repeat(auto-fill,minmax(180px,1fr))"]].map(([group,label,cols])=>(
         <div key={group} style={{marginBottom:24}}>
           <div style={{fontSize:13,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:12}}>{label}</div>
           <div style={{display:"grid",gridTemplateColumns:cols,gap:12}}>
@@ -1140,9 +1151,174 @@ function HomePage({sessions,mmrHistory,tournaments,config,onNavigate,onEditMMR})
   );
 }
 
-function SessionDetailPage({session,config,onBack,onUpdateSession}){
+function CollapsibleSummary({summary, label}){
+  const [open,setOpen]=useState(false);
+  const clean=cleanSummary(summary)||'';
+  return(
+    <div style={{marginBottom:14}}>
+      <button onClick={()=>setOpen(o=>!o)}
+        style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",
+          background:open?"rgba(88,101,242,0.15)":"#252636",
+          border:`1px solid ${open?"#5865F2":"#2e3050"}`,
+          borderRadius:open?"10px 10px 0 0":"10px",cursor:"pointer",textAlign:"left"}}>
+        <span style={{fontSize:12,fontWeight:700,color:"#5865F2",flex:1}}>{label}</span>
+        <span style={{fontSize:11,color:"#72767d"}}>{open?"▲ Cerrar":"▼ Ver resumen"}</span>
+      </button>
+      {open&&<div style={{background:"rgba(88,101,242,0.05)",border:"1px solid #5865F2",borderTop:"none",borderRadius:"0 0 10px 10px",padding:"14px 16px"}}>
+        {clean.split('\n').filter(l=>l.trim()).map((line,i)=>(
+          <div key={i} style={{fontSize:13,color:"#b9bbbe",lineHeight:1.8,marginBottom:6}}>{line}</div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
+function HistorialSection({count, editing, children}){
+  const [open,setOpen]=useState(true);
+  return(
+    <div style={{marginBottom:0}}>
+      <button onClick={()=>setOpen(o=>!o)}
+        style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"12px 16px",
+          background:open?"#2e2f42":"#252636",border:"1px solid #2e3050",
+          borderRadius:open?"10px 10px 0 0":"10px",cursor:"pointer"}}>
+        <span style={{fontSize:14,fontWeight:600,color:"#b9bbbe",flex:1}}>📋 Historial de partidas ({count})</span>
+        {editing&&<span style={{fontSize:11,color:"#FEE75C"}}>✏️ Edición activa</span>}
+        <span style={{fontSize:11,color:"#72767d"}}>{open?"▲ Cerrar":"▼ Ver partidas"}</span>
+      </button>
+      {open&&<div style={{background:"#252636",border:"1px solid #2e3050",borderTop:"none",borderRadius:"0 0 10px 10px",padding:"20px"}}>
+        {children}
+      </div>}
+    </div>
+  );
+}
+
+function AddMatchToSession({session, mode, errors, hits, duel, onSave}){
+  const [open, setOpen] = useState(false);
+  const [currE, setCurrE] = useState({});
+  const [currH, setCurrH] = useState({});
+  const [currR, setCurrR] = useState(null);
+  const [scoreUs, setScoreUs] = useState("");
+  const [scoreThem, setScoreThem] = useState("");
+  const [myGoals, setMyGoals] = useState("");
+  const [myAssists, setMyAssists] = useState("");
+  const [mySaves, setMySaves] = useState("");
+  const [mecLabel, setMecLabel] = useState("");
+  const [mecIntentos, setMecIntentos] = useState(0);
+  const [mecLogradas, setMecLogradas] = useState(0);
+
+  const reset = () => {
+    setCurrE({}); setCurrH({}); setCurrR(null);
+    setScoreUs(""); setScoreThem("");
+    setMyGoals(""); setMyAssists(""); setMySaves("");
+    setMecLabel(""); setMecIntentos(0); setMecLogradas(0);
+  };
+
+  const save = () => {
+    if(!currR) return;
+    const score = scoreUs!==""&&scoreThem!==""?{us:Number(scoreUs),them:Number(scoreThem)}:null;
+    const mecanica = mecLabel?{label:mecLabel,intentos:mecIntentos,logradas:mecLogradas}:null;
+    const newMatch = {id:Date.now(),result:currR,errors:{...currE},hits:{...currH},
+      score, mecanica, customHit:null, summary:null,
+      myGoals:!duel&&myGoals!==""?Number(myGoals):null,
+      myAssists:!duel&&myAssists!==""?Number(myAssists):null,
+      mySaves:!duel&&mySaves!==""?Number(mySaves):null};
+    onSave(newMatch);
+    reset();
+    setOpen(false);
+  };
+
+  const currEtot = Object.values(currE).reduce((a,b)=>a+b,0);
+
+  return(
+    <div style={{marginBottom:16}}>
+      <button onClick={()=>{setOpen(o=>!o);reset();}}
+        style={{display:"flex",alignItems:"center",gap:8,padding:"10px 16px",
+          background:open?`${mode.color}15`:C.card,
+          border:`1px solid ${open?mode.color:C.border}`,
+          borderRadius:open?"10px 10px 0 0":"10px",cursor:"pointer",width:"100%"}}>
+        <span style={{fontSize:13,fontWeight:600,color:open?mode.color:C.sub,flex:1}}>+ Añadir partida a esta sesión</span>
+        <span style={{fontSize:11,color:C.muted}}>{open?"▲ Cancelar":"▼ Abrir"}</span>
+      </button>
+      {open&&<div style={{background:C.card,border:`1px solid ${mode.color}`,borderTop:"none",borderRadius:"0 0 10px 10px",padding:"20px"}}>
+        {/* Result */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Resultado</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+            {[["win","Victoria",C.green],["mvp","MVP 👑",C.amber],["loss","Derrota",C.red],["draw","Empate","#7289da"]].map(([v,l,col])=>(
+              <button key={v} onClick={()=>setCurrR(currR===v?null:v)}
+                style={{padding:"10px 4px",borderRadius:8,border:`1.5px solid ${currR===v?col:C.border}`,background:currR===v?`${col}15`:"none",color:currR===v?col:C.sub,fontSize:13,fontWeight:currR===v?700:400}}>{l}</button>
+            ))}
+          </div>
+        </div>
+        {/* Score + personal stats */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Marcador (opcional)</div>
+          <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
+        </div>
+        {/* Errors */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.red,fontWeight:600,marginBottom:8}}>Errores {currEtot>0&&<span style={{color:C.text}}>({currEtot})</span>}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {errors.map(e=>{const cnt=currE[e.id]||0;return(
+              <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.surface,borderRadius:8,border:`1px solid ${cnt>0?`${C.red}40`:C.border}`}}>
+                <span style={{fontSize:11,color:C.muted,flex:1}}>{e.label}</span>
+                <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                  <button onClick={()=>setCurrE(p=>({...p,[e.id]:Math.max(0,(p[e.id]||0)-1)}))} disabled={cnt===0} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:cnt>0?C.text:C.muted,minWidth:16,textAlign:"center"}}>{cnt}</span>
+                  <button onClick={()=>setCurrE(p=>({...p,[e.id]:(p[e.id]||0)+1}))} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.red}40`,background:`${C.red}15`,color:C.red,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+        {/* Hits */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.green,fontWeight:600,marginBottom:8}}>Aciertos</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {hits.map(h=>{const cnt=currH[h.id]||0;return(
+              <div key={h.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.surface,borderRadius:8,border:`1px solid ${cnt>0?`${C.green}40`:C.border}`}}>
+                <span style={{fontSize:11,color:C.muted,flex:1}}>{h.label}</span>
+                <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                  <button onClick={()=>setCurrH(p=>({...p,[h.id]:Math.max(0,(p[h.id]||0)-1)}))} disabled={cnt===0} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:cnt>0?C.green:C.muted,minWidth:16,textAlign:"center"}}>{cnt}</span>
+                  <button onClick={()=>setCurrH(p=>({...p,[h.id]:(p[h.id]||0)+1}))} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.green}40`,background:`${C.green}15`,color:C.green,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+        {/* Mecánica */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,color:C.blue,fontWeight:600,marginBottom:8}}>Mecánica (opcional)</div>
+          <input value={mecLabel} onChange={e=>setMecLabel(e.target.value)} placeholder="Ej: Aerial doble toque..."
+            style={{width:"100%",background:C.surface,border:`1px solid ${mecLabel?`${C.blue}40`:C.border}`,borderRadius:8,padding:"8px 12px",color:C.text,fontSize:12,outline:"none",marginBottom:mecLabel?8:0}}/>
+          {mecLabel&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+            {[["Intentos",mecIntentos,setMecIntentos,C.sub],["Logradas",mecLogradas,setMecLogradas,C.blue]].map(([label,val,setter,col])=>(
+              <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 10px",background:C.surface,borderRadius:8,border:`1px solid ${C.border}`}}>
+                <span style={{fontSize:11,color:C.muted}}>{label}</span>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <button onClick={()=>setter(p=>Math.max(0,p-1))} style={{width:22,height:22,borderRadius:4,border:`1px solid ${C.border}`,background:C.hover,color:C.muted,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:col}}>{val}</span>
+                  <button onClick={()=>setter(p=>p+1)} style={{width:22,height:22,borderRadius:4,border:`1px solid ${col}40`,background:`${col}15`,color:col,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                </div>
+              </div>
+            ))}
+          </div>}
+        </div>
+        <button onClick={save} disabled={!currR}
+          style={{width:"100%",padding:"12px",borderRadius:10,border:"none",
+            background:currR?mode.color:C.border,color:currR?"#fff":C.muted,
+            fontSize:14,fontWeight:700,cursor:currR?"pointer":"default"}}>
+          ✓ Guardar partida
+        </button>
+      </div>}
+    </div>
+  );
+}
+
+function SessionDetailPage({session,config,custom={},onBack,onUpdateSession}){
   const mode=MODES.find(m=>m.id===session.modeId)||{name:session.modeName,color:C.blue,icon:"🎮"};
-  const errors=getModeErrors(mode),duel=is1v1(session.modeId);
+  const errors=getModeErrors(mode,custom),hits=getModeHits(mode,custom),duel=is1v1(session.modeId);
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(null);
   const startEdit=()=>{setDraft(JSON.parse(JSON.stringify(session)));setEditing(true);};
   const cancelEdit=()=>{setDraft(null);setEditing(false);};
@@ -1204,16 +1380,10 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
           <Card key={l} style={{padding:"12px 14px"}}><div style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:.7,marginBottom:4}}>{l}</div><div style={{fontFamily:"'DM Mono',monospace",fontSize:20,fontWeight:700,color:col,lineHeight:1}}>{v}</div></Card>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:20}}>
-        {src.sessionSummary&&<Card style={{borderColor:`${C.blue}30`,marginBottom:14}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:8}}>💬 Análisis IA — Resumen de sesión</div>
-          <div style={{fontSize:13,color:C.sub,lineHeight:1.8}}>{src.sessionSummary}</div>
-        </Card>}
-        <Card>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-            <div style={{fontSize:14,fontWeight:600,color:C.sub}}>Historial de partidas</div>
-            {editing&&<span style={{fontSize:11,color:C.amber}}>✏️ Edición activa</span>}
-          </div>
+      <div style={{display:"flex",flexDirection:"column",gap:16}}>
+        {src.sessionSummary&&!src.sessionSummary.startsWith('__')&&
+          <CollapsibleSummary summary={src.sessionSummary} label="💬 Análisis IA — Resumen de sesión"/>}
+        <HistorialSection count={src.matches.length} editing={editing}>
           {src.matches.map((m,i)=>{
             const et=Object.values(m.errors).reduce((a,b)=>a+b,0);
             const errLabels=errors.filter(e=>(m.errors[e.id]||0)>0).map(e=>`${e.label} ×${m.errors[e.id]}`);
@@ -1245,12 +1415,17 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
                 </div>
                 {errLabels.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,paddingBottom:4,paddingLeft:36}}>{errLabels.map((l,j)=><span key={j} style={{background:`${C.red}15`,color:C.red,borderRadius:4,padding:"2px 8px",fontSize:11}}>{l}</span>)}</div>}
                 {m.mecanica?.label&&<div style={{paddingLeft:36,paddingBottom:4,fontSize:11,color:C.blue}}>🎯 {m.mecanica.label}: <strong>{m.mecanica.logradas}/{m.mecanica.intentos}</strong> ({m.mecanica.intentos>0?Math.round(m.mecanica.logradas/m.mecanica.intentos*100):0}%)</div>}
-                {m.summary&&<div style={{marginLeft:36,marginBottom:6,padding:"8px 10px",background:`${C.blue}08`,borderRadius:6,fontSize:11,color:C.sub,lineHeight:1.6,borderLeft:`2px solid ${C.blue}40`}}>{m.summary}</div>}
+                
               </div>
             );
           })}
-        </Card>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        </HistorialSection>
+          <AddMatchToSession
+            session={src} mode={mode} errors={errors} hits={hits} duel={duel}
+            onSave={(newMatch)=>{
+              const updated={...src,matches:[...src.matches,newMatch]};
+              onUpdateSession(updated);
+            }}/>
           <Card>
             <div style={{fontSize:13,fontWeight:600,color:C.sub,marginBottom:14}}>Errores de la sesión</div>
             {errors.map(e=>{const tot=totE[e.id]||0,isFocus=src.focusError===e.id;return(
@@ -1268,8 +1443,8 @@ function SessionDetailPage({session,config,onBack,onUpdateSession}){
               ))}
             </div>
           </Card>}
-        </div>
       </div>
+
     </div>
   );
 }
@@ -1291,8 +1466,7 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
   const [mecIntentos,setMecIntentos]=useState(0);
   const [mecLogradas,setMecLogradas]=useState(0);
   const [newMecInput,setNewMecInput]=useState("");
-  const [matchSummary,setMatchSummary]=useState(null);
-  const [loadingSummary,setLoadingSummary]=useState(false);
+
   const [sessionSummary,setSessionSummary]=useState(null);
   const [loadingSessionSummary,setLoadingSessionSummary]=useState(false);
   const [editingMatchIdx,setEditingMatchIdx]=useState(null);
@@ -1337,16 +1511,6 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
     // Auto-save draft after each match (clear inProgress since match is now saved)
     saveDraft(modeId,{step:"tracking",startMMR,focusErr,matches:[...matches,newMatch],inProgress:null});
     setMatchSummary(null);
-    // Generate match summary async
-    if(getAIKey()){
-      setLoadingSummary(true);
-      const summary=await generateMatchSummary(newMatch,mode,errors,hits);
-      if(summary){
-        setMatchSummary(summary);
-        setMatches(p=>p.map(m=>m.id===newMatch.id?{...m,summary}:m));
-      }
-      setLoadingSummary(false);
-    }
   };
   const saveSession=async()=>{
     setLoadingSessionSummary(true);
@@ -1545,15 +1709,8 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
             <div style={{fontSize:12,fontWeight:600,color:C.sub,marginBottom:10}}>Estadísticas <span style={{color:C.muted,fontWeight:400}}>(opcional)</span></div>
             <PersonalStatFields duel={duel} scoreUs={scoreUs} setScoreUs={setScoreUs} scoreThem={scoreThem} setScoreThem={setScoreThem} myGoals={myGoals} setMyGoals={setMyGoals} myAssists={myAssists} setMyAssists={setMyAssists} mySaves={mySaves} setMySaves={setMySaves}/>
             <div style={{marginTop:16}}><PrimaryBtn onClick={addMatch} color={mode.color} disabled={!currR}>✓ Guardar partida {matches.length+1}</PrimaryBtn></div>
-            {loadingSummary&&<div style={{marginTop:10,padding:"8px 12px",background:`${C.amber}10`,borderRadius:8,fontSize:12,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA...</div>}
-            {matchSummary&&!loadingSummary&&<div style={{marginTop:10,padding:"12px",
-              background:matchSummary.startsWith('__')?`${C.red}10`:`${C.blue}10`,
-              border:`1px solid ${matchSummary.startsWith('__')?C.red:C.blue}30`,borderRadius:8,fontSize:12,color:C.sub,lineHeight:1.7}}>
-              <div style={{fontSize:11,fontWeight:700,color:matchSummary.startsWith('__')?C.red:C.blue,marginBottom:6}}>
-                {matchSummary.startsWith('__NO_KEY__')?'⚠ Sin API Key — configúrala en ⚙ Config':matchSummary.startsWith('__ERROR__')?'✕ Error IA: '+matchSummary.replace('__ERROR__: ',''):'💬 Análisis IA — Última partida'}
-              </div>
-              {!matchSummary.startsWith('__')&&matchSummary}
-            </div>}
+
+
           </Card>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -1844,10 +2001,8 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
       </div>
       {/* Session summary — full width below grid */}
       {loadingSessionSummary&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.amber}10`,border:`1px solid ${C.amber}30`,borderRadius:10,fontSize:13,color:C.amber,textAlign:"center"}}>⟳ Generando resumen IA de sesión...</div>}
-      {sessionSummary&&!sessionSummary.startsWith('__')&&<div style={{marginTop:16,padding:"20px 24px",background:`${C.blue}08`,border:`1px solid ${C.blue}30`,borderRadius:12,lineHeight:1.9}}>
-        <div style={{fontSize:12,fontWeight:700,color:C.blue,marginBottom:10,textTransform:"uppercase",letterSpacing:.8}}>💬 Análisis IA — Sesión completa</div>
-        <div style={{fontSize:14,color:C.sub}}>{sessionSummary}</div>
-      </div>}
+      {sessionSummary&&!sessionSummary.startsWith('__')&&
+        <div style={{marginTop:16}}><CollapsibleSummary summary={sessionSummary} label="💬 Análisis IA — Sesión completa"/></div>}
       {sessionSummary&&sessionSummary.startsWith('__ERROR__')&&<div style={{marginTop:16,padding:"12px 16px",background:`${C.red}10`,border:`1px solid ${C.red}30`,borderRadius:10,fontSize:12,color:C.red}}>
         ✕ Error IA: {sessionSummary.replace('__ERROR__: ','')}
       </div>}
@@ -2289,19 +2444,12 @@ function OnboardingWizard({ onComplete }) {
         </div>}
         {step===0&&<div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`,textAlign:'center'}}>
           <h1 style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:12}}>Bienvenido a RL Tracker</h1>
-          <p style={{fontSize:14,color:C.muted,lineHeight:1.7,marginBottom:28}}>Tu herramienta personal para trackear MMR, analizar errores y mejorar en Rocket League.<br/><br/>Vamos a configurar tu perfil en menos de un minuto.</p>
-          <div style={{background:`${C.blue}10`,border:`1px solid ${C.blue}30`,borderRadius:10,padding:16,marginBottom:28,textAlign:'left'}}>
-            {['Registra sesiones y partidas por modo','Analiza tus errores más frecuentes','Sincroniza en todos tus dispositivos'].map(t=>(
-              <div key={t} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
-                <span style={{color:C.green,fontSize:14}}>✓</span><span style={{fontSize:13,color:C.sub}}>{t}</span>
-              </div>
-            ))}
-          </div>
-          <button onClick={()=>setStep(1)} style={{width:'100%',padding:'14px',background:C.blue,color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>Empezar configuración →</button>
+          <p style={{fontSize:14,color:C.muted,lineHeight:1.7,marginBottom:28}}>Tu herramienta para trackear MMR, analizar errores y mejorar en Rocket League.<br/><br/>Configura tu perfil en menos de un minuto.</p>
+          <button onClick={()=>setStep(1)} style={{width:'100%',padding:'14px',background:C.blue,color:'#fff',border:'none',borderRadius:10,fontSize:15,fontWeight:700,cursor:'pointer'}}>Empezar →</button>
         </div>}
         {step===1&&<div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
           <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>¿Cómo te llaman?</h2>
-          <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Tu gamertag o nombre para personalizar la app.</p>
+          <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Tu gamertag o nombre.</p>
           <input value={name} onChange={e=>setName(e.target.value)} placeholder="Ej: ProPlayer99"
             style={{width:'100%',background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:'14px 16px',color:C.text,fontSize:20,fontWeight:700,fontFamily:"'DM Sans',sans-serif",marginBottom:24,outline:'none'}}
             onKeyDown={e=>e.key==='Enter'&&name.trim()&&setStep(2)} autoFocus/>
@@ -2312,7 +2460,7 @@ function OnboardingWizard({ onComplete }) {
         </div>}
         {step===2&&<div style={{background:C.surface,borderRadius:16,padding:32,border:`1px solid ${C.border}`}}>
           <h2 style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6}}>Modos Estándar</h2>
-          <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Pon tu MMR actual. Si no juegas uno, pon 0.</p>
+          <p style={{fontSize:13,color:C.muted,marginBottom:24}}>Tu MMR actual. Si no juegas uno, pon 0.</p>
           {stdModes.map(mode=>{
             const val=mmrs[mode.id]; const rank=val!==''&&!isNaN(val)?getRank(Number(val),mode.id,DEFAULT_MODE_RANKS):null;
             return(<div key={mode.id} style={{marginBottom:16}}>
@@ -2463,7 +2611,7 @@ function App(){
       {showCloud&&<CloudConfigModal onClose={()=>setShowCloud(false)} onSaved={()=>{setSyncStatus('idle');doInit();}}/>}
       {showImport&&<ImportExportModal onClose={()=>setShowImport(false)} onImport={handleImport}/>}
       {viewSess
-        ?<SessionDetailPage session={viewSess} config={config} onBack={()=>setViewSess(null)} onUpdateSession={handleUpdateSession}/>
+        ?<SessionDetailPage session={viewSess} config={config} custom={custom} onBack={()=>setViewSess(null)} onUpdateSession={handleUpdateSession}/>
         :page==="home"        ?<HomePage sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config} onNavigate={setPage} onEditMMR={m=>setMmrModal(m)}/>
         :page==="stats"       ?<StatsPage sessions={sessions} mmrHistory={mmrHist} config={config} custom={custom} onViewSession={s=>setViewSess(s)}/>
         :page==="tournaments" ?<TournamentPage sessions={sessions} tournaments={tournaments} config={config} onSaveTournament={handleSaveTournament}/>
