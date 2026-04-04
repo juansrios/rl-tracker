@@ -1119,7 +1119,7 @@ function HomePage({sessions,mmrHistory,tournaments,config,onNavigate,onEditMMR})
         {[{label:"Sesiones",value:sessions.length,color:C.blue},{label:"Partidas",value:totalMatches,color:C.green},{label:"Torneos",value:tournaments.length,color:C.orange},{label:"Modos activos",value:MODES.filter(m=>sessions.some(s=>s.modeId===m.id)).length,color:C.amber}]
           .map(item=><Card key={item.label}><StatBlock label={item.label} value={item.value} valueColor={item.color}/></Card>)}
       </div>
-      {[["standard","Modos Estándar","repeat(3,1fr)"],["special","Modos Especiales","repeat(5,1fr)"]].map(([group,label,cols])=>(
+      {[["standard","Modos Estándar","repeat(auto-fill,minmax(260px,1fr))"],["special","Modos Especiales","repeat(auto-fill,minmax(180px,1fr))"]].map(([group,label,cols])=>(
         <div key={group} style={{marginBottom:24}}>
           <div style={{fontSize:13,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:.8,marginBottom:12}}>{label}</div>
           <div style={{display:"grid",gridTemplateColumns:cols,gap:12}}>
