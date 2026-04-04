@@ -1010,7 +1010,7 @@ function AppShell({children,activePage,onNavigate,sessions,mmrHistory,tournament
   );
 }
 
-function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose}){
+function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,syncStatus,syncLabel,syncColor,lastSync,onOpenCloud,onOpenImport,onPullNow,cloudCfg,open,mobile,onClose,playerName}){
   const w=mobile?(open?280:0):(open?240:64);
   const nav=(p)=>{onNavigate(p);if(mobile)onClose();};
   if(mobile&&!open)return null;
