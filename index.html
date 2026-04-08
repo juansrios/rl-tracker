@@ -798,8 +798,8 @@ function getCloudCfg() {
 }
 function saveCloudCfg(cfg) { localStorage.setItem(JKEY, JSON.stringify(cfg)); }
 
-function bundleData(sessions, mmrHist, tournaments, config) {
-  return { sessions, mmrHistory: mmrHist, tournaments, config, lastSync: Date.now() };
+function bundleData(sessions, mmrHist, tournaments, config, custom, mechanics) {
+  return { sessions, mmrHistory: mmrHist, tournaments, config, custom: custom||{}, mechanics: mechanics||{}, lastSync: Date.now() };
 }
 function unbundleData(record) {
   return {
@@ -807,6 +807,8 @@ function unbundleData(record) {
     mmrHistory:  record.mmrHistory  || {},
     tournaments: record.tournaments || [],
     config:      record.config      || {},
+    custom:      record.custom      || {},
+    mechanics:   record.mechanics   || {},
   };
 }
 
@@ -1098,6 +1100,10 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
             style={{width:'100%',marginTop:6,padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
             📦 Importar / Exportar JSON
           </button>
+          {syncStatus==='error'&&cloudCfg&&<button onClick={onPullNow}
+            style={{width:'100%',marginTop:6,padding:'6px 4px',borderRadius:6,border:`1px solid ${C.red}`,background:`${C.red}10`,color:C.red,fontSize:11,cursor:'pointer',fontWeight:600}}>
+            ↺ Reintentar conexión
+          </button>}
         </>:<div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'center'}}>
           <button onClick={onOpenCloud} title="Config nube" style={{width:36,height:36,borderRadius:8,border:`1px solid ${cloudCfg?C.border:C.blue}`,background:cloudCfg?'none':`${C.blue}20`,color:cloudCfg?C.muted:C.blue,fontSize:14,cursor:'pointer'}}>☁</button>
           <button onClick={onOpenImport} title="Importar/Exportar" style={{width:36,height:36,borderRadius:8,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:14,cursor:'pointer'}}>📦</button>
@@ -2451,12 +2457,18 @@ function App(){
   // Run once on mount
   React.useEffect(() => { doInit(); }, []);
 
-  const doSync = async (s, m, t, cfg) => {
+  const doSync = async (s, m, t, cfg, cx, mx) => {
     if (!getCloudCfg()) { setSyncStatus('no_config'); return; }
     setSyncStatus('syncing');
-    const result = await pushToCloud(bundleData(s, m, t, cfg));
+    // Retry up to 2 times on failure
+    let result = { ok: false };
+    for(let i=0; i<3; i++){
+      result = await pushToCloud(bundleData(s, m, t, cfg, cx||custom, mx||mechanics));
+      if(result.ok) break;
+      if(i<2) await new Promise(r=>setTimeout(r, 1500*(i+1)));
+    }
     if (result.ok) { setSyncStatus('ok'); setLastSync(new Date()); }
-    else { setSyncStatus('error'); }
+    else { setSyncStatus('error'); console.warn('Sync failed:', result); }
   };
 
   const handleSave = (session) => {
@@ -2464,29 +2476,29 @@ function App(){
     let nh = mmrHist;
     if(session.endMMR){ nh={...mmrHist}; if(!nh[session.modeId])nh[session.modeId]=[]; nh[session.modeId]=[...nh[session.modeId],{date:session.date,mmr:session.endMMR}]; setMmrHist(nh); saveMMR(nh); }
     setPage("home");
-    doSync(ns, nh, tournaments, config);
+    doSync(ns, nh, tournaments, config, custom, mechanics);
   };
   const handleUpdateSession = (updated) => {
     const ns=sessions.map(s=>s.id===updated.id?updated:s); setSessions(ns); saveSessions(ns); setViewSess(updated);
-    doSync(ns, mmrHist, tournaments, config);
+    doSync(ns, mmrHist, tournaments, config, custom, mechanics);
   };
   const handleSaveMMR = (mode, mmr) => {
     const nh={...mmrHist}; if(!nh[mode.id])nh[mode.id]=[];
     nh[mode.id]=[...nh[mode.id],{date:new Date().toLocaleDateString("es-ES"),mmr}];
     setMmrHist(nh); saveMMR(nh); setMmrModal(null);
-    doSync(sessions, nh, tournaments, config);
+    doSync(sessions, nh, tournaments, config, custom, mechanics);
   };
-  const handleSaveConfig = (cfg) => { setConfig(cfg); saveConfig(cfg); doSync(sessions, mmrHist, tournaments, cfg); };
+  const handleSaveConfig = (cfg) => { setConfig(cfg); saveConfig(cfg); doSync(sessions, mmrHist, tournaments, cfg, custom, mechanics); };
   const handleSaveCustom = (cx) => { setCustom(cx); saveCustomItems(cx); };
   const handleSaveMechanics = (mx) => { setMechanics(mx); saveMechanics(mx); };
-  const handleSaveTournament = (t) => { const nt=[t,...tournaments]; setTournaments(nt); saveTournaments(nt); doSync(sessions, mmrHist, nt, config); };
+  const handleSaveTournament = (t) => { const nt=[t,...tournaments]; setTournaments(nt); saveTournaments(nt); doSync(sessions, mmrHist, nt, config, custom, mechanics); };
 
   const handleImport = (bundle) => {
     if(bundle.sessions)    { setSessions(bundle.sessions);       saveSessions(bundle.sessions); }
     if(bundle.mmrHistory)  { setMmrHist(bundle.mmrHistory);      saveMMR(bundle.mmrHistory); }
     if(bundle.tournaments) { setTournaments(bundle.tournaments);  saveTournaments(bundle.tournaments); }
     if(bundle.config)      { setConfig(bundle.config);           saveConfig(bundle.config); }
-    doSync(bundle.sessions||sessions, bundle.mmrHistory||mmrHist, bundle.tournaments||tournaments, bundle.config||config);
+    doSync(bundle.sessions||sessions, bundle.mmrHistory||mmrHist, bundle.tournaments||tournaments, bundle.config||config, bundle.custom||custom, bundle.mechanics||mechanics);
   };
 
   const handlePullNow = async () => {
@@ -2504,7 +2516,7 @@ function App(){
 
   const modeId=page.startsWith("session_")?page.replace("session_",""):null;
   const syncColor = syncStatus==='ok'?C.green : syncStatus==='syncing'?C.amber : syncStatus==='error'?C.red : C.muted;
-  const syncLabel = syncStatus==='ok'?'✓ Sync' : syncStatus==='syncing'?'⟳ Sync…' : syncStatus==='error'?'✕ Sync' : cloudCfg ? '↕ Sync' : '☁ Config';
+  const syncLabel = syncStatus==='ok'?'✓ Sync' : syncStatus==='syncing'?'⟳ Sync…' : syncStatus==='error'?'✕ Error — reintentando' : cloudCfg ? '↕ Sync' : '☁ Config';
 
   return(
     <AppShell activePage={page} onNavigate={p=>{setPage(p);setViewSess(null);}} sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config}
