@@ -13,197 +13,312 @@
     :root{
       --bg:#0a0a0f;--surface:#13131c;--card:#1a1a26;--border:#252535;
       --text:#f0f0f8;--sub:#9090b0;--muted:#505068;
-      --green:#39d98a;--red:#ff4757;--amber:#ffd32a;--blue:#5352ed;
-      --orange:#ff6b35;--purple:#a55eea;
+      --green:#39d98a;--red:#ff4757;--amber:#ffd32a;
+      --blue:#5352ed;--orange:#ff6b35;--pink:#ff6b9d;
     }
     body{background:var(--bg);font-family:'Barlow',sans-serif;color:var(--text);min-height:100vh;}
-    button{cursor:pointer;font-family:'Barlow',sans-serif;}
-    button:active{transform:scale(.97);}
-    input{font-family:'Barlow',sans-serif;}
+    button{cursor:pointer;font-family:'Barlow',sans-serif;transition:opacity .1s;}
+    button:active{opacity:.8;}
+    input,select{font-family:'Barlow',sans-serif;}
     ::-webkit-scrollbar{width:4px;}
     ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
-    .display{font-family:'Barlow Condensed',sans-serif;}
-    @keyframes slideUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
-    .animate-in{animation:slideUp .25s ease forwards;}
+    .D{font-family:'Barlow Condensed',sans-serif;}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+    .au{animation:fadeUp .2s ease forwards;}
   </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState, useEffect, useRef} = React;
+const {useState,useEffect,useRef}=React;
 
-// ── EXERCISE DEFINITIONS ─────────────────────────────────────────────────────
-// Keys match exactly RL Tracker error IDs
-const EXERCISES = {
-  whiff:      {name:"Mountain Climbers",  icon:"🧗", muscle:"Core + Coordinación",   unit:"reps", baseReps:20, baseSets:2, rest:45,  desc:"Desde plancha, lleva rodillas al pecho alternando rápido"},
-  overcommit: {name:"Squat Jumps",        icon:"⚡", muscle:"Piernas + Explosividad", unit:"reps", baseReps:12, baseSets:2, rest:60,  desc:"Sentadilla profunda, salta al subir, aterriza suave"},
-  rotacion:   {name:"Russian Twists",     icon:"🔄", muscle:"Core + Rotación",        unit:"reps", baseReps:20, baseSets:2, rest:40,  desc:"Sentado, pies levantados, gira tocando el suelo a cada lado"},
-  open_net:   {name:"Burpees",            icon:"💥", muscle:"Full Body + Resistencia", unit:"reps", baseReps:8,  baseSets:2, rest:75,  desc:"Plancha – push-up – salto. El rey del castigo"},
-  kickoff:    {name:"Jumping Jacks",      icon:"🦘", muscle:"Cardio + Explosividad",  unit:"reps", baseReps:30, baseSets:2, rest:30,  desc:"Saltos abriendo brazos y piernas. Rítmico y constante"},
-  boost:      {name:"Plancha Isométrica", icon:"🧱", muscle:"Core + Estabilidad",     unit:"seg",  baseReps:30, baseSets:2, rest:40,  desc:"Codos al suelo, cuerpo recto. Aguanta cada segundo"},
-  // Special mode errors
-  posicion:   {name:"Zancadas Laterales", icon:"↔️", muscle:"Piernas + Agilidad",     unit:"reps", baseReps:16, baseSets:2, rest:45,  desc:"Paso lateral amplio, baja la cadera, alterna lados"},
-  timing:     {name:"Saltos al Cajón",    icon:"📦", muscle:"Piernas + Timing",       unit:"reps", baseReps:10, baseSets:2, rest:60,  desc:"Salta con los dos pies a una superficie elevada y baja controlado"},
-  cincuenta:  {name:"Push-ups",           icon:"💪", muscle:"Pecho + Core",           unit:"reps", baseReps:15, baseSets:2, rest:45,  desc:"Manos a la anchura de hombros, pecho al suelo, sube fuerte"},
+// ── RANKS ─────────────────────────────────────────────────────────────────────
+const RANKS=[
+  {id:"bronze",  label:"Bronze",   tier:1, color:"#CD7F32"},
+  {id:"silver",  label:"Silver",   tier:2, color:"#BDC3C7"},
+  {id:"gold",    label:"Gold",     tier:3, color:"#F4D03F"},
+  {id:"plat",    label:"Platinum", tier:4, color:"#76D7C4"},
+  {id:"diamond", label:"Diamond",  tier:5, color:"#5DADE2"},
+  {id:"champ",   label:"Champion", tier:6, color:"#9B59B6"},
+  {id:"gc",      label:"GC+",      tier:7, color:"#FF6B6B"},
+];
+
+// ── AREAS ─────────────────────────────────────────────────────────────────────
+const AREAS=[
+  {id:"upper",   label:"Tren Superior", icon:"💪"},
+  {id:"core",    label:"Tren Medio",    icon:"🔥"},
+  {id:"lower",   label:"Tren Inferior", icon:"🦵"},
+  {id:"full",    label:"Cuerpo Completo",icon:"⚡"},
+];
+
+// ── EXERCISE POOL ─────────────────────────────────────────────────────────────
+// Each exercise: areas[], genders (m/f/both), minTier, maxTier, name, unit, reps, rest
+const POOL=[
+  // UPPER
+  {id:"pushup",    areas:["upper","full"],  gender:"m", min:1, name:"Push-ups",          icon:"💪", muscle:"Pecho + Tríceps",      unit:"reps",baseReps:12,rest:45, desc:"Manos a anchura de hombros, pecho al suelo, sube fuerte"},
+  {id:"pushup_k",  areas:["upper","full"],  gender:"f", min:1, name:"Push-ups rodilla",  icon:"💪", muscle:"Pecho + Tríceps",      unit:"reps",baseReps:15,rest:45, desc:"Rodillas en el suelo, misma posición de brazo"},
+  {id:"tricep",    areas:["upper","full"],  gender:"b", min:1, name:"Dips en silla",      icon:"🪑", muscle:"Tríceps",              unit:"reps",baseReps:12,rest:40, desc:"Manos en silla, baja doblando codos, sube"},
+  {id:"plank",     areas:["upper","core"],  gender:"b", min:1, name:"Plancha",            icon:"🧱", muscle:"Core + Estabilidad",   unit:"seg", baseReps:30,rest:40, desc:"Codos al suelo, cuerpo recto, aguanta"},
+  {id:"shoulder",  areas:["upper"],         gender:"b", min:3, name:"Pike Push-ups",      icon:"🔺", muscle:"Hombros",              unit:"reps",baseReps:10,rest:50, desc:"Cadera arriba en V invertida, baja la cabeza al suelo"},
+  // CORE
+  {id:"crunch",    areas:["core"],          gender:"b", min:1, name:"Crunches",           icon:"🔄", muscle:"Abdomen",              unit:"reps",baseReps:20,rest:35, desc:"Espalda en el suelo, eleva hombros hacia rodillas"},
+  {id:"twist",     areas:["core","full"],   gender:"b", min:1, name:"Russian Twists",     icon:"🌀", muscle:"Core + Rotación",      unit:"reps",baseReps:20,rest:40, desc:"Sentado, pies levantados, gira tocando suelo a cada lado"},
+  {id:"mclimb",    areas:["core","full"],   gender:"b", min:2, name:"Mountain Climbers",  icon:"🧗", muscle:"Core + Cardio",        unit:"reps",baseReps:20,rest:40, desc:"Desde plancha, lleva rodillas al pecho alternando rápido"},
+  {id:"legrise",   areas:["core"],          gender:"b", min:1, name:"Elevaciones pierna", icon:"🦵", muscle:"Abdomen Bajo",         unit:"reps",baseReps:15,rest:40, desc:"Espalda plana, sube las piernas rectas a 90°"},
+  {id:"superman",  areas:["core"],          gender:"b", min:1, name:"Superman",           icon:"🦸", muscle:"Espalda Baja",         unit:"seg", baseReps:25,rest:35, desc:"Boca abajo, eleva brazos y piernas simultáneamente"},
+  // LOWER
+  {id:"squat",     areas:["lower","full"],  gender:"b", min:1, name:"Sentadillas",        icon:"🏋️", muscle:"Piernas + Glúteos",   unit:"reps",baseReps:15,rest:45, desc:"Pies separados, baja hasta paralelo, rodillas no pasan pies"},
+  {id:"sqjump",    areas:["lower","full"],  gender:"b", min:3, name:"Squat Jumps",        icon:"⚡", muscle:"Piernas + Explosividad",unit:"reps",baseReps:12,rest:60, desc:"Sentadilla profunda, salta al subir, aterriza suave"},
+  {id:"lunge",     areas:["lower"],         gender:"b", min:1, name:"Zancadas",           icon:"🦵", muscle:"Piernas + Equilibrio", unit:"reps",baseReps:16,rest:45, desc:"Paso amplio adelante, rodilla trasera casi toca el suelo"},
+  {id:"calf",      areas:["lower"],         gender:"b", min:1, name:"Elevaciones talón",  icon:"👟", muscle:"Gemelos",              unit:"reps",baseReps:25,rest:30, desc:"Párate en puntillas lentamente, baja controlado"},
+  {id:"glute",     areas:["lower","core"],  gender:"b", min:1, name:"Puente de glúteos",  icon:"🌉", muscle:"Glúteos + Core",       unit:"reps",baseReps:20,rest:35, desc:"Espalda en suelo, pies apoyados, eleva cadera"},
+  // FULL
+  {id:"burpee",    areas:["full"],          gender:"b", min:4, name:"Burpees",            icon:"💥", muscle:"Full Body",            unit:"reps",baseReps:8, rest:75, desc:"Plancha–push-up–salto. El rey del castigo"},
+  {id:"burpee_e",  areas:["full"],          gender:"b", min:1, name:"Burpees sin salto",  icon:"💥", muscle:"Full Body",            unit:"reps",baseReps:10,rest:60, desc:"Igual que burpee normal pero sin el salto final"},
+  {id:"jjack",     areas:["full"],          gender:"b", min:1, name:"Jumping Jacks",      icon:"🦘", muscle:"Cardio + Full Body",   unit:"reps",baseReps:30,rest:30, desc:"Saltos abriendo brazos y piernas. Rítmico y constante"},
+  {id:"bear",      areas:["full"],          gender:"b", min:2, name:"Bear Crawls",        icon:"🐻", muscle:"Full Body + Core",     unit:"reps",baseReps:10,rest:50, desc:"A cuatro patas con rodillas a 5cm del suelo, avanza"},
+];
+
+// ── ERROR → EXERCISE MAPPING ──────────────────────────────────────────────────
+// For each error ID, which pool exercise IDs are appropriate
+const ERROR_MAP={
+  whiff:      {upper:["pushup","pushup_k","shoulder"],   core:["mclimb","plank"],      lower:["sqjump","squat"], full:["mclimb","burpee","burpee_e"]},
+  overcommit: {upper:["pushup","pushup_k","tricep"],     core:["twist","crunch"],      lower:["sqjump","lunge"], full:["sqjump","burpee","burpee_e"]},
+  rotacion:   {upper:["tricep","plank"],                 core:["twist","legrise"],     lower:["glute","lunge"],  full:["twist","bear","jjack"]},
+  open_net:   {upper:["pushup","shoulder"],              core:["mclimb","superman"],   lower:["sqjump","calf"],  full:["burpee","burpee_e","jjack"]},
+  kickoff:    {upper:["plank","pushup_k"],               core:["crunch","superman"],   lower:["squat","calf"],   full:["jjack","bear","burpee_e"]},
+  boost:      {upper:["plank","shoulder"],               core:["plank","superman"],    lower:["glute","squat"],  full:["plank","bear","jjack"]},
+  posicion:   {upper:["pushup","pushup_k"],              core:["legrise","crunch"],    lower:["lunge","glute"],  full:["squat","jjack","burpee_e"]},
+  timing:     {upper:["tricep","shoulder"],              core:["twist","mclimb"],      lower:["sqjump","calf"],  full:["mclimb","burpee_e","jjack"]},
+  cincuenta:  {upper:["pushup","pushup_k"],              core:["crunch","plank"],      lower:["squat","lunge"],  full:["burpee_e","bear","jjack"]},
 };
 
-const HIT_REDUCTION = 3;
-const WKEY = 'rlw_history';
-function loadHistory(){ try{const s=localStorage.getItem(WKEY);return s?JSON.parse(s):[];}catch{return[];} }
-function saveHistory(h){ localStorage.setItem(WKEY,JSON.stringify(h)); }
+const ERR_LABELS={
+  whiff:"Whiff en Aerial",overcommit:"Overcommit / Doble Commit",rotacion:"Mala Rotación",
+  open_net:"Open Net Fallado",kickoff:"Kickoff Perdido",boost:"Boost Mal Gestionado",
+  posicion:"Error de Posicionamiento",timing:"Mal Timing",cincuenta:"Perdiste el 50/50"
+};
 
-function getAllSessions(){
-  // Try both rlt3_s (your version) and rlt3f_s (friend version)
-  for(const key of ['rlt3_s','rlt3f_s']){
-    try{
-      const raw=localStorage.getItem(key);
-      if(raw){const d=JSON.parse(raw);if(d&&d.length>0)return d;}
-    }catch{}
-  }
-  return [];
+function pickExercise(errId, area, gender, tier){
+  const candidates=(ERROR_MAP[errId]||{})[area]||[];
+  // Filter by pool availability, gender compatibility, tier range
+  const filtered=candidates
+    .map(id=>POOL.find(e=>e.id===id))
+    .filter(e=>e && (e.gender==="b"||e.gender===gender) && e.min<=tier);
+  if(filtered.length>0) return filtered[0];
+  // Fallback: any pool exercise for this area and gender/tier
+  const fallback=POOL.filter(e=>e.areas.includes(area)&&(e.gender==="b"||e.gender===gender)&&e.min<=tier);
+  return fallback[0]||POOL[0];
 }
 
-function calcWorkout(errors, totalHits){
-  const reduction = Math.floor(totalHits / HIT_REDUCTION);
-  const plan = [];
-  Object.entries(errors).forEach(([errId, count]) => {
-    if(count<=0) return;
-    const ex = EXERCISES[errId];
-    if(!ex) return;
-    plan.push({ errId, ...ex, sets: Math.min(5, ex.baseSets + count - 1) });
+function buildPlan(errors, hits, area, gender, tier){
+  const HIT_REDUCTION=3;
+  const reduction=Math.floor(hits/HIT_REDUCTION);
+  const plan=[];
+
+  Object.entries(errors).forEach(([errId,count])=>{
+    if(count<=0)return;
+    const ex=pickExercise(errId, area, gender, tier);
+    if(!ex)return;
+    // Check if this exercise is already in plan (same errId can map to same exercise)
+    const existing=plan.find(p=>p.exId===ex.id);
+    const sets=Math.max(1, Math.min(5, 1+(count-1)));
+    if(existing){ existing.sets=Math.min(5,existing.sets+sets); existing.errIds.push(errId); }
+    else plan.push({exId:ex.id,...ex,sets,errIds:[errId],errLabels:[ERR_LABELS[errId]]});
   });
+
+  // Ensure min 1 set per exercise (already guaranteed above)
   // Apply hit reduction
-  let toReduce = Math.min(reduction, plan.reduce((a,e)=>a+e.sets,0) - plan.length);
-  const sorted = [...plan].sort((a,b)=>b.sets-a.sets);
-  for(const ex of sorted){
-    if(toReduce<=0) break;
-    const orig = plan.find(p=>p.errId===ex.errId);
-    const reduce = Math.min(orig.sets-1, toReduce);
-    orig.sets -= reduce;
-    toReduce -= reduce;
+  let toReduce=Math.min(reduction, plan.reduce((a,e)=>a+e.sets,0)-plan.length);
+  for(const ex of [...plan].sort((a,b)=>b.sets-a.sets)){
+    if(toReduce<=0)break;
+    const orig=plan.find(p=>p.exId===ex.exId);
+    const reduce=Math.min(orig.sets-1,toReduce);
+    orig.sets-=reduce;toReduce-=reduce;
   }
   return plan.filter(p=>p.sets>0);
 }
 
-function applySession(session){
-  const errors = {};
-  const allErrIds = Object.keys(EXERCISES);
-  let totalErr = {};
-  session.matches?.forEach(m=>{
-    Object.entries(m.errors||{}).forEach(([k,v])=>{ totalErr[k]=(totalErr[k]||0)+v; });
-  });
-  allErrIds.forEach(k=>{ errors[k]=totalErr[k]||0; });
-  let hits=0;
-  session.matches?.forEach(m=>{ Object.values(m.hits||{}).forEach(v=>{ hits+=v; }); });
-  return {errors, hits};
+// ── STORAGE ───────────────────────────────────────────────────────────────────
+const WKEY='rlw_history2';
+function loadHistory(){try{const s=localStorage.getItem(WKEY);return s?JSON.parse(s):[];}catch{return[];}}
+function saveHistory(h){localStorage.setItem(WKEY,JSON.stringify(h));}
+
+function getAllSessions(){
+  for(const key of['rlt3_s','rlt3f_s']){
+    try{const raw=localStorage.getItem(key);if(raw){const d=JSON.parse(raw);if(d&&d.length>0)return d;}}catch{}
+  }return[];
 }
 
-// ── TIMER ────────────────────────────────────────────────────────────────────
-function Timer({seconds, total, onDone, label, color="var(--green)"}){
+function extractFromSession(session){
+  const errors=Object.fromEntries(Object.keys(ERR_LABELS).map(k=>[k,0]));
+  let hits=0;
+  session.matches?.forEach(m=>{
+    Object.entries(m.errors||{}).forEach(([k,v])=>{if(k in errors)errors[k]=(errors[k]||0)+v;});
+    Object.values(m.hits||{}).forEach(v=>{hits+=v;});
+  });
+  return{errors,hits};
+}
+
+// ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
+const Btn=({onClick,children,color="var(--border)",textColor="var(--sub)",active=false,disabled=false,style:ex={}})=>(
+  <button onClick={onClick} disabled={disabled}
+    style={{padding:"10px 16px",borderRadius:10,border:`2px solid ${active?color:"var(--border)"}`,
+      background:active?`${color}18`:"var(--card)",color:active?color:textColor,
+      fontSize:13,fontWeight:active?700:500,opacity:disabled?.4:1,...ex}}>
+    {children}
+  </button>
+);
+
+const Counter=({value,onChange,color="var(--red)"})=>(
+  <div style={{display:"flex",alignItems:"center",gap:6}}>
+    <button onClick={()=>onChange(Math.max(0,value-1))}
+      style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--sub)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+    <span className="D" style={{fontSize:22,fontWeight:700,color:value>0?color:"var(--muted)",minWidth:20,textAlign:"center"}}>{value}</span>
+    <button onClick={()=>onChange(value+1)}
+      style={{width:28,height:28,borderRadius:6,border:`1px solid ${color}40`,background:`${color}10`,color,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+  </div>
+);
+
+function Timer({seconds,total,onDone,label,color="var(--green)"}){
   const [left,setLeft]=useState(seconds);
   useEffect(()=>{
-    const iv=setInterval(()=>setLeft(l=>{
-      if(l<=1){clearInterval(iv);onDone();return 0;}
-      return l-1;
-    }),1000);
+    const iv=setInterval(()=>setLeft(l=>{if(l<=1){clearInterval(iv);onDone();return 0;}return l-1;}),1000);
     return()=>clearInterval(iv);
   },[]);
-  const r=72,circ=2*Math.PI*r,offset=circ-(left/total)*circ;
+  const r=70,circ=2*Math.PI*r,offset=circ-(left/total)*circ;
   return(
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:20}}>
-      <div style={{fontSize:13,fontWeight:600,color:"var(--sub)",textTransform:"uppercase",letterSpacing:2}}>{label}</div>
-      <div style={{width:160,height:160,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",position:"relative"}}>
-        <svg width="160" height="160" viewBox="0 0 160 160" style={{position:"absolute",top:0,left:0,transform:"rotate(-90deg)"}}>
-          <circle cx="80" cy="80" r={r} fill="none" stroke="var(--border)" strokeWidth="6"/>
-          <circle cx="80" cy="80" r={r} fill="none" stroke={color} strokeWidth="6"
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
+      <div style={{fontSize:12,fontWeight:600,color:"var(--sub)",textTransform:"uppercase",letterSpacing:2}}>{label}</div>
+      <div style={{width:156,height:156,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+        <svg width="156" height="156" viewBox="0 0 156 156" style={{position:"absolute",top:0,left:0,transform:"rotate(-90deg)"}}>
+          <circle cx="78" cy="78" r={r} fill="none" stroke="var(--border)" strokeWidth="6"/>
+          <circle cx="78" cy="78" r={r} fill="none" stroke={color} strokeWidth="6"
             strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
             style={{transition:"stroke-dashoffset .9s linear"}}/>
         </svg>
         <div style={{position:"relative",zIndex:1,textAlign:"center"}}>
-          <div className="display" style={{fontSize:56,fontWeight:900,lineHeight:1,color}}>{left}</div>
-          <div style={{fontSize:12,color:"var(--muted)"}}>segundos</div>
+          <div className="D" style={{fontSize:52,fontWeight:900,lineHeight:1,color}}>{left}</div>
+          <div style={{fontSize:11,color:"var(--muted)"}}>seg</div>
         </div>
       </div>
-      <button onClick={onDone} style={{padding:"8px 24px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13}}>Saltar →</button>
+      <button onClick={onDone} style={{padding:"7px 22px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--muted)",fontSize:12}}>Saltar →</button>
     </div>
   );
 }
 
-function SetDots({current, total, color}){
+function SetDots({done,total,color}){
   return(
-    <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+    <div style={{display:"flex",gap:7,justifyContent:"center"}}>
       {Array.from({length:total}).map((_,i)=>(
-        <div key={i} style={{width:12,height:12,borderRadius:3,background:i<current?color:"var(--border)",border:`1px solid ${i<current?color:"var(--border)"}`,transition:"background .2s"}}/>
+        <div key={i} style={{width:11,height:11,borderRadius:3,background:i<done?color:"var(--border)",border:`1px solid ${i<done?color:"var(--border)"}`,transition:"background .15s"}}/>
       ))}
     </div>
   );
 }
 
-// ── EXECUTION ────────────────────────────────────────────────────────────────
-function ExecutionScreen({plan, onFinish}){
+// ── EXECUTION ─────────────────────────────────────────────────────────────────
+function ExecutionScreen({players,onFinish}){
+  // players = [{name, plan, color}]
+  const [pIdx,setPIdx]=useState(0); // which player's turn (for co-op)
   const [exIdx,setExIdx]=useState(0);
   const [setNum,setSetNum]=useState(1);
-  const [phase,setPhase]=useState("intro");
+  const [phase,setPhase]=useState("show"); // show | work | rest | done
   const [doneSets,setDoneSets]=useState(0);
-  const ex=plan[exIdx];
-  const totalSets=plan.reduce((a,e)=>a+e.sets,0);
-  const pct=totalSets>0?Math.round((doneSets/totalSets)*100):0;
+  const isCoop=players.length>1;
 
-  const finishSet=()=>{
+  const player=players[pIdx];
+  const plan=player.plan;
+  const ex=plan[exIdx];
+  const totalSets=players.reduce((a,p)=>a+p.plan.reduce((b,e)=>b+e.sets,0),0);
+  const overallPct=totalSets>0?Math.round((doneSets/totalSets)*100):0;
+
+  const advanceNext=()=>{
     setDoneSets(d=>d+1);
     if(setNum<ex.sets){setSetNum(s=>s+1);setPhase("rest");}
     else if(exIdx+1<plan.length){setExIdx(i=>i+1);setSetNum(1);setPhase("rest");}
-    else setPhase("done");
+    else if(isCoop&&pIdx+1<players.length){
+      // Switch to next player
+      setPIdx(p=>p+1);setExIdx(0);setSetNum(1);setPhase("show");
+    }else{setPhase("done");}
   };
 
   if(phase==="done")return(
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
       <div style={{fontSize:72,marginBottom:16}}>🏆</div>
-      <div className="display" style={{fontSize:52,fontWeight:900,color:"var(--green)",marginBottom:8}}>¡COMPLETADO!</div>
-      <div style={{fontSize:16,color:"var(--sub)",marginBottom:32}}>{totalSets} series · {plan.length} ejercicios</div>
-      <button onClick={()=>onFinish(true)} style={{padding:"14px 36px",borderRadius:10,border:"none",background:"var(--green)",color:"#000",fontSize:16,fontWeight:700}}>Ver historial →</button>
+      <div className="D" style={{fontSize:52,fontWeight:900,color:"var(--green)",marginBottom:8}}>¡COMPLETADO!</div>
+      <div style={{fontSize:15,color:"var(--sub)",marginBottom:8}}>{totalSets} series · {players.reduce((a,p)=>a+p.plan.length,0)} ejercicios</div>
+      {isCoop&&<div style={{fontSize:13,color:"var(--muted)",marginBottom:24}}>{players.map(p=>p.name).join(" + ")}</div>}
+      <button onClick={()=>onFinish(true)} style={{padding:"14px 36px",borderRadius:10,border:"none",background:"var(--green)",color:"#000",fontSize:16,fontWeight:700}}>
+        Ver historial →
+      </button>
     </div>
   );
 
   if(phase==="rest")return(
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,gap:12}}>
-      <Timer seconds={ex.rest} total={ex.rest} onDone={()=>setPhase("intro")} label="Descanso" color="var(--amber)"/>
-      {exIdx+1<plan.length&&setNum>=ex.sets&&<div style={{fontSize:13,color:"var(--sub)"}}>Siguiente: <strong>{plan[exIdx+1]?.name}</strong></div>}
+      <Timer seconds={ex.rest} total={ex.rest} onDone={()=>setPhase("show")} label="Descanso" color="var(--amber)"/>
     </div>
   );
 
   return(
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",padding:24}}>
-      <div style={{marginBottom:24}}>
+      {/* Progress */}
+      <div style={{marginBottom:20}}>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--muted)",marginBottom:6}}>
-          <span>Ejercicio {exIdx+1} de {plan.length}</span>
-          <span>{pct}% completado</span>
+          <span>{isCoop?`${player.name} — `:""}Ejercicio {exIdx+1}/{plan.length}</span>
+          <span>{overallPct}%</span>
         </div>
         <div style={{height:3,background:"var(--border)",borderRadius:2}}>
-          <div style={{height:"100%",width:`${pct}%`,background:"var(--green)",borderRadius:2,transition:"width .4s"}}/>
+          <div style={{height:"100%",width:`${overallPct}%`,background:player.color||"var(--green)",borderRadius:2,transition:"width .4s"}}/>
         </div>
+        {isCoop&&<div style={{display:"flex",gap:6,marginTop:8}}>
+          {players.map((p,i)=>(
+            <div key={i} style={{fontSize:11,padding:"2px 8px",borderRadius:4,
+              background:i===pIdx?`${p.color}20`:"none",
+              border:`1px solid ${i===pIdx?p.color:"var(--border)"}`,
+              color:i===pIdx?p.color:"var(--muted)"}}>
+              {p.name}
+            </div>
+          ))}
+        </div>}
       </div>
-      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,textAlign:"center"}}>
-        <div style={{fontSize:64}}>{ex.icon}</div>
+
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:18,textAlign:"center"}}>
+        <div style={{fontSize:60}}>{ex.icon}</div>
         <div>
-          <div className="display" style={{fontSize:42,fontWeight:900,lineHeight:1}}>{ex.name}</div>
+          <div className="D" style={{fontSize:40,fontWeight:900,lineHeight:1}}>{ex.name}</div>
           <div style={{fontSize:13,color:"var(--sub)",marginTop:4}}>{ex.muscle}</div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:6,flexWrap:"wrap"}}>
+            {ex.errLabels?.map((l,i)=>(
+              <span key={i} style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:"rgba(255,71,87,.1)",color:"var(--red)",border:"1px solid rgba(255,71,87,.25)"}}>{l}</span>
+            ))}
+          </div>
         </div>
-        <div style={{display:"flex",gap:24,alignItems:"center"}}>
+
+        {/* Reps + set info */}
+        <div style={{display:"flex",gap:20,alignItems:"center"}}>
           <div style={{textAlign:"center"}}>
-            <div className="display" style={{fontSize:52,fontWeight:900,color:"var(--orange)"}}>{ex.reps}</div>
+            <div className="D" style={{fontSize:58,fontWeight:900,color:player.color||"var(--orange)",lineHeight:1}}>{ex.baseReps}</div>
             <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase"}}>{ex.unit}</div>
           </div>
           <div style={{width:1,height:48,background:"var(--border)"}}/>
           <div style={{textAlign:"center"}}>
-            <div className="display" style={{fontSize:28,fontWeight:700,color:"var(--sub)"}}>Serie {setNum}/{ex.sets}</div>
+            <div className="D" style={{fontSize:26,fontWeight:700,color:"var(--sub)"}}>Serie {setNum}/{ex.sets}</div>
+            <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{ex.rest}s descanso</div>
           </div>
         </div>
-        <SetDots current={setNum-1} total={ex.sets} color="var(--orange)"/>
+
+        <SetDots done={setNum-1} total={ex.sets} color={player.color||"var(--orange)"}/>
+
         <div style={{background:"var(--card)",borderRadius:10,padding:"10px 18px",fontSize:13,color:"var(--sub)",maxWidth:300,lineHeight:1.6,border:"1px solid var(--border)"}}>{ex.desc}</div>
+
         {ex.unit==="seg"
-          ?<Timer seconds={ex.reps} total={ex.reps} onDone={finishSet} label="Aguanta" color="var(--orange)"/>
-          :<button onClick={finishSet} style={{padding:"16px 48px",borderRadius:12,border:"none",background:"var(--orange)",color:"#fff",fontSize:18,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:1}}>
+          ?<Timer seconds={ex.baseReps} total={ex.baseReps} onDone={advanceNext} label="Aguanta" color={player.color||"var(--orange)"}/>
+          :<button onClick={advanceNext}
+            style={{padding:"16px 48px",borderRadius:12,border:"none",
+              background:player.color||"var(--orange)",color:"#fff",
+              fontSize:18,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:1}}>
             ✓ SERIE COMPLETA
           </button>}
       </div>
@@ -211,265 +326,344 @@ function ExecutionScreen({plan, onFinish}){
   );
 }
 
-// ── SESSION PICKER ───────────────────────────────────────────────────────────
-function SessionPicker({sessions, onSelect, onClose}){
+// ── SESSION PICKER ────────────────────────────────────────────────────────────
+function SessionPicker({sessions,onSelect,onClose}){
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center",padding:16}} onClick={onClose}>
       <div style={{background:"var(--surface)",borderRadius:"16px 16px 12px 12px",width:"100%",maxWidth:520,maxHeight:"70vh",overflow:"auto",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:"var(--surface)"}}>
+        <div style={{padding:"14px 18px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:"var(--surface)"}}>
           <div style={{fontSize:15,fontWeight:700}}>Seleccionar sesión</div>
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--muted)",fontSize:20,cursor:"pointer"}}>✕</button>
         </div>
         {sessions.length===0
           ?<div style={{padding:32,textAlign:"center",color:"var(--muted)",fontSize:13}}>No hay sesiones en RL Tracker. Añade errores manualmente.</div>
           :sessions.slice(0,10).map((s,i)=>{
-            const totalErr=s.matches?.reduce((a,m)=>a+Object.values(m.errors||{}).reduce((x,y)=>x+y,0),0)||0;
-            const totalHits=s.matches?.reduce((a,m)=>a+Object.values(m.hits||{}).reduce((x,y)=>x+y,0),0)||0;
+            const te=s.matches?.reduce((a,m)=>a+Object.values(m.errors||{}).reduce((x,y)=>x+y,0),0)||0;
+            const th=s.matches?.reduce((a,m)=>a+Object.values(m.hits||{}).reduce((x,y)=>x+y,0),0)||0;
             return(
               <button key={i} onClick={()=>onSelect(s)}
-                style={{display:"flex",alignItems:"center",gap:14,width:"100%",padding:"14px 20px",border:"none",borderBottom:"1px solid var(--border)",background:"none",cursor:"pointer",textAlign:"left"}}
+                style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 18px",border:"none",borderBottom:"1px solid var(--border)",background:"none",cursor:"pointer",textAlign:"left"}}
                 onMouseEnter={e=>e.currentTarget.style.background="var(--card)"}
                 onMouseLeave={e=>e.currentTarget.style.background="none"}>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{s.modeName}</div>
                   <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.date}{s.time&&s.time!=="Posicionamiento"?` · ${s.time}`:""} · {s.matches?.length||0}p</div>
                 </div>
-                <div style={{display:"flex",gap:12,flexShrink:0}}>
-                  {totalErr>0&&<span style={{fontSize:12,color:"var(--red)",fontWeight:600}}>{totalErr} err</span>}
-                  {totalHits>0&&<span style={{fontSize:12,color:"var(--green)",fontWeight:600}}>{totalHits} ✓</span>}
-                  {totalErr===0&&<span style={{fontSize:12,color:"var(--muted)"}}>Sin errores</span>}
+                <div style={{display:"flex",gap:10,flexShrink:0}}>
+                  <span style={{fontSize:12,color:"var(--red)",fontWeight:600}}>{te} err</span>
+                  {th>0&&<span style={{fontSize:12,color:"var(--green)",fontWeight:600}}>{th} ✓</span>}
                 </div>
-                <span style={{color:"var(--muted)",fontSize:16}}>›</span>
+                <span style={{color:"var(--muted)"}}>›</span>
               </button>
             );
-          })
-        }
+          })}
       </div>
     </div>
   );
 }
 
-// ── SETUP ────────────────────────────────────────────────────────────────────
-function SetupScreen({onStart}){
-  const [mode,setMode]=useState(null);
-  const [errors,setErrors]=useState(()=>Object.fromEntries(Object.keys(EXERCISES).map(k=>[k,0])));
-  const [hits,setHits]=useState(0);
-  const [sessionInfo,setSessionInfo]=useState(null);
+// ── PLAYER CONFIG ─────────────────────────────────────────────────────────────
+function PlayerConfig({player, onChange, label, color}){
+  const [importMode,setImportMode]=useState("manual");
+  const [sessions]=useState(getAllSessions);
   const [showPicker,setShowPicker]=useState(false);
-  const [sessions,setSessions]=useState([]);
-  const [fileError,setFileError]=useState('');
+  const [sessionInfo,setSessionInfo]=useState(null);
 
+  const selectSession=(s)=>{
+    const{errors,hits}=extractFromSession(s);
+    setSessionInfo(s);onChange({...player,errors,hits});setShowPicker(false);
+    setImportMode("auto");
+  };
+
+  const setErr=(k,v)=>onChange({...player,errors:{...player.errors,[k]:Math.max(0,v)}});
+  const totalErrors=Object.values(player.errors).reduce((a,b)=>a+b,0);
+
+  return(
+    <div style={{marginBottom:20}}>
+      {showPicker&&<SessionPicker sessions={sessions} onSelect={selectSession} onClose={()=>setShowPicker(false)}/>}
+
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <div style={{width:10,height:10,borderRadius:"50%",background:color,flexShrink:0}}/>
+        <div className="D" style={{fontSize:20,fontWeight:800,color}}>{label}</div>
+      </div>
+
+      {/* Gender */}
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Género</div>
+        <div style={{display:"flex",gap:8}}>
+          {[["m","♂ Masculino"],["f","♀ Femenino"]].map(([g,lbl])=>(
+            <Btn key={g} active={player.gender===g} color={color} onClick={()=>onChange({...player,gender:g})} style={{flex:1,textAlign:"center"}}>
+              {lbl}
+            </Btn>
+          ))}
+        </div>
+      </div>
+
+      {/* Rank */}
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Rango actual</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+          {RANKS.map(r=>(
+            <button key={r.id} onClick={()=>onChange({...player,rankId:r.id,tier:r.tier})}
+              style={{padding:"8px 4px",borderRadius:8,border:`2px solid ${player.rankId===r.id?r.color:"var(--border)"}`,
+                background:player.rankId===r.id?`${r.color}18`:"var(--card)",
+                color:player.rankId===r.id?r.color:"var(--muted)",fontSize:11,fontWeight:player.rankId===r.id?700:400}}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Source of errors */}
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Errores de la sesión</div>
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          {sessions.length>0&&<button onClick={()=>setShowPicker(true)}
+            style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${importMode==="auto"?color:"var(--border)"}`,
+              background:importMode==="auto"?`${color}10`:"var(--card)",color:importMode==="auto"?color:"var(--sub)",fontSize:12,cursor:"pointer"}}>
+            ⚡ {sessionInfo?"Sesión cargada":"Importar sesión"}
+          </button>}
+          <button onClick={()=>{setImportMode("manual");setSessionInfo(null);}}
+            style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${importMode==="manual"?color:"var(--border)"}`,
+              background:importMode==="manual"?`${color}10`:"var(--card)",color:importMode==="manual"?color:"var(--sub)",fontSize:12,cursor:"pointer"}}>
+            ✏️ Manual
+          </button>
+        </div>
+        {sessionInfo&&importMode==="auto"&&(
+          <div style={{fontSize:11,color:"var(--muted)",padding:"6px 10px",background:"var(--surface)",borderRadius:6,marginBottom:8,display:"flex",justifyContent:"space-between"}}>
+            <span>{sessionInfo.modeName} · {sessionInfo.date}</span>
+            <span style={{color:"var(--red)"}}>{totalErrors} err</span>
+          </div>
+        )}
+      </div>
+
+      {/* Error counters */}
+      <div style={{display:"grid",gap:6}}>
+        {Object.entries(ERR_LABELS).map(([k,lbl])=>(
+          <div key={k} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"var(--card)",borderRadius:8,
+            border:`1px solid ${player.errors[k]>0?"rgba(255,71,87,.3)":"var(--border)"}`}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,color:player.errors[k]>0?"var(--text)":"var(--sub)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lbl}</div>
+            </div>
+            <Counter value={player.errors[k]||0} onChange={v=>setErr(k,v)} color="var(--red)"/>
+          </div>
+        ))}
+        {/* Hits */}
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"rgba(57,217,138,.05)",borderRadius:8,border:"1px solid rgba(57,217,138,.2)"}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:12,fontWeight:600,color:"var(--green)"}}>✓ Aciertos totales</div>
+            <div style={{fontSize:10,color:"var(--muted)"}}>Cada 3 = −1 serie</div>
+          </div>
+          <Counter value={player.hits||0} onChange={v=>onChange({...player,hits:v})} color="var(--green)"/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SETUP SCREEN ──────────────────────────────────────────────────────────────
+function SetupScreen({onStart}){
+  const [step,setStep]=useState("mode"); // mode | area | config | preview
+  const [mode,setMode]=useState(null); // individual | coop
+  const [area,setArea]=useState(null);
+  const defaultPlayer=()=>({gender:"m",rankId:"gold",tier:3,errors:Object.fromEntries(Object.keys(ERR_LABELS).map(k=>[k,0])),hits:0});
+  const [p1,setP1]=useState(defaultPlayer);
+  const [p2,setP2]=useState({...defaultPlayer(),gender:"f"});
+  const [sessions]=useState(getAllSessions);
+
+  // Auto-load last session for individual
   useEffect(()=>{
-    const s=getAllSessions();
-    setSessions(s);
-    if(s.length>0&&mode===null){
-      const {errors:e,hits:h}=applySession(s[0]);
-      setErrors(e);setHits(h);setSessionInfo(s[0]);setMode('auto');
+    if(sessions.length>0){
+      const{errors,hits}=extractFromSession(sessions[0]);
+      setP1(prev=>({...prev,errors,hits}));
     }
   },[]);
 
-  const selectSession=(s)=>{
-    const {errors:e,hits:h}=applySession(s);
-    setErrors(e);setHits(h);setSessionInfo(s);setMode('auto');setShowPicker(false);
+  const COLORS=["var(--orange)","var(--pink)"];
+
+  const buildPlayers=()=>{
+    if(mode==="individual"){
+      return[{name:"Tú",color:COLORS[0],plan:buildPlan(p1.errors,p1.hits,area,p1.gender,p1.tier)}];
+    }else{
+      return[
+        {name:"Jugador 1",color:COLORS[0],plan:buildPlan(p1.errors,p1.hits,area,p1.gender,p1.tier)},
+        {name:"Jugador 2",color:COLORS[1],plan:buildPlan(p2.errors,p2.hits,area,p2.gender,p2.tier)},
+      ];
+    }
   };
 
-  const handleFile=(e)=>{
-    const file=e.target.files[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=(ev)=>{
-      try{
-        const data=JSON.parse(ev.target.result);
-        const s=data.sessions||data.rlt3_s||data.rlt3f_s||(Array.isArray(data)?data:null);
-        if(s&&s.length>0){setSessions(s);selectSession(s[0]);setFileError('');}
-        else setFileError('No se encontraron sesiones.');
-      }catch{setFileError('Archivo JSON inválido.');}
-    };
-    reader.readAsText(file);
-  };
-
-  const setErr=(k,v)=>setErrors(prev=>({...prev,[k]:Math.max(0,v)}));
-  const plan=calcWorkout(errors,hits);
-  const totalErrors=Object.values(errors).reduce((a,b)=>a+b,0);
-  const reduction=Math.floor(hits/HIT_REDUCTION);
-  const totalSets=plan.reduce((a,e)=>a+e.sets,0);
-
-  const ERR_LABELS={
-    whiff:"Whiff en Aerial", overcommit:"Overcommit / Doble Commit", rotacion:"Mala Rotación",
-    open_net:"Open Net Fallado", kickoff:"Kickoff Perdido", boost:"Boost Mal Gestionado",
-    posicion:"Error de Posicionamiento", timing:"Mal Timing en Remate", cincuenta:"Perdiste el 50/50"
-  };
+  const players=step==="preview"?buildPlayers():[];
+  const p1Errors=Object.values(p1.errors).reduce((a,b)=>a+b,0);
+  const p2Errors=Object.values(p2.errors).reduce((a,b)=>a+b,0);
+  const canStart=players.length>0&&players.every(p=>p.plan.length>0);
 
   return(
-    <div style={{maxWidth:540,margin:"0 auto",padding:"24px 16px 80px"}}>
-      {showPicker&&<SessionPicker sessions={sessions} onSelect={selectSession} onClose={()=>setShowPicker(false)}/>}
+    <div style={{maxWidth:520,margin:"0 auto",padding:"20px 16px 80px"}}>
 
-      <div style={{textAlign:"center",marginBottom:28,paddingTop:8}}>
-        <div style={{fontSize:44,marginBottom:8}}>🏋️</div>
-        <div className="display" style={{fontSize:38,fontWeight:900,letterSpacing:-1}}>RL WORKOUT</div>
-        <div style={{fontSize:13,color:"var(--sub)",marginTop:4}}>Entrena tus errores de Rocket League</div>
+      {/* Header */}
+      <div style={{textAlign:"center",marginBottom:24,paddingTop:8}}>
+        <div style={{fontSize:42,marginBottom:6}}>🏋️</div>
+        <div className="D" style={{fontSize:36,fontWeight:900,letterSpacing:-1}}>RL WORKOUT</div>
+        <div style={{fontSize:12,color:"var(--sub)",marginTop:3}}>Entrena tus errores de Rocket League</div>
       </div>
 
-      {/* Source selector */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
-        {[["auto","⚡ Importar sesión","Desde RL Tracker"],["manual","✏️ Manual","Introduce errores tú"]]
-          .map(([m,label,desc])=>(
-          <button key={m} onClick={()=>setMode(m)}
-            style={{padding:"12px",borderRadius:10,border:`2px solid ${mode===m?"var(--green)":"var(--border)"}`,
-              background:mode===m?"rgba(57,217,138,.08)":"var(--card)",
-              color:mode===m?"var(--green)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
-            <div style={{fontSize:14,fontWeight:700,marginBottom:2}}>{label}</div>
-            <div style={{fontSize:11,color:"var(--muted)"}}>{desc}</div>
-          </button>
+      {/* Step indicator */}
+      <div style={{display:"flex",gap:6,marginBottom:24,justifyContent:"center"}}>
+        {["mode","area","config","preview"].map((s,i)=>(
+          <div key={s} style={{width:28,height:4,borderRadius:2,
+            background:["mode","area","config","preview"].indexOf(step)>=i?"var(--orange)":"var(--border)",
+            transition:"background .2s"}}/>
         ))}
       </div>
 
-      {/* Auto mode */}
-      {mode==="auto"&&(
-        <div style={{marginBottom:20}}>
-          {sessionInfo?(
-            <div style={{background:"rgba(57,217,138,.06)",border:"1px solid rgba(57,217,138,.3)",borderRadius:10,padding:"12px 16px",marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <div style={{color:"var(--green)",fontWeight:700,fontSize:13}}>✓ Sesión cargada</div>
-                <button onClick={()=>setShowPicker(true)}
-                  style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--green)",background:"none",color:"var(--green)",fontSize:11,cursor:"pointer"}}>
-                  Cambiar →
-                </button>
-              </div>
-              <div style={{fontSize:13,color:"var(--sub)"}}>{sessionInfo.modeName} · {sessionInfo.date}</div>
-              <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
-                {sessionInfo.matches?.length||0} partidas · <span style={{color:"var(--red)"}}>{totalErrors} errores</span> · <span style={{color:"var(--green)"}}>{hits} aciertos</span>
-              </div>
-            </div>
-          ):(
-            <div style={{marginBottom:12}}>
-              <button onClick={()=>setShowPicker(true)}
-                style={{width:"100%",padding:"12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card)",color:"var(--sub)",fontSize:13,cursor:"pointer",marginBottom:10}}>
-                📋 Seleccionar sesión de RL Tracker
+      {/* STEP 1: Mode */}
+      {step==="mode"&&(
+        <div className="au">
+          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:14}}>Modo de juego</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:24}}>
+            {[["individual","👤","Individual","Solo tú"],["coop","👥","Cooperativo","Tú y alguien más"]].map(([m,ic,lbl,desc])=>(
+              <button key={m} onClick={()=>setMode(m)}
+                style={{padding:"18px 14px",borderRadius:12,border:`2px solid ${mode===m?"var(--orange)":"var(--border)"}`,
+                  background:mode===m?"rgba(255,107,53,.08)":"var(--card)",
+                  color:mode===m?"var(--orange)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
+                <div style={{fontSize:28,marginBottom:6}}>{ic}</div>
+                <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>{lbl}</div>
+                <div style={{fontSize:11,color:"var(--muted)"}}>{desc}</div>
               </button>
-              <div style={{fontSize:12,color:"var(--muted)",marginBottom:8,textAlign:"center"}}>o importa el JSON de backup:</div>
-              <label style={{display:"block",padding:"10px",border:"1px dashed var(--border)",borderRadius:8,textAlign:"center",cursor:"pointer",fontSize:13,color:"var(--sub)"}}>
-                📦 Seleccionar archivo JSON
-                <input type="file" accept=".json" onChange={handleFile} style={{display:"none"}}/>
-              </label>
-              {fileError&&<div style={{fontSize:12,color:"var(--red)",marginTop:6}}>{fileError}</div>}
-            </div>
-          )}
+            ))}
+          </div>
+          <button onClick={()=>mode&&setStep("area")} disabled={!mode}
+            style={{width:"100%",padding:"14px",borderRadius:10,border:"none",background:mode?"var(--orange)":"var(--border)",color:mode?"#fff":"var(--muted)",fontSize:15,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:1}}>
+            CONTINUAR →
+          </button>
         </div>
       )}
 
-      {/* Error inputs */}
-      {(mode==="manual"||(mode==="auto"&&sessionInfo))&&(
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>
-            {mode==="manual"?"Errores de tu sesión":"Ajustar errores"}
+      {/* STEP 2: Area */}
+      {step==="area"&&(
+        <div className="au">
+          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:14}}>Área a trabajar</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:24}}>
+            {AREAS.map(a=>(
+              <button key={a.id} onClick={()=>setArea(a.id)}
+                style={{padding:"16px 12px",borderRadius:12,border:`2px solid ${area===a.id?"var(--blue)":"var(--border)"}`,
+                  background:area===a.id?"rgba(83,82,237,.08)":"var(--card)",
+                  color:area===a.id?"var(--blue)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
+                <div style={{fontSize:26,marginBottom:6}}>{a.icon}</div>
+                <div style={{fontSize:14,fontWeight:700}}>{a.label}</div>
+              </button>
+            ))}
           </div>
-          {Object.entries(EXERCISES).map(([k,ex])=>(
-            <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,padding:"10px 14px",background:"var(--card)",borderRadius:8,border:`1px solid ${errors[k]>0?"rgba(255,71,87,.35)":"var(--border)"}`}}>
-              <span style={{fontSize:20,width:26,textAlign:"center"}}>{ex.icon}</span>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:13,fontWeight:600,color:errors[k]>0?"var(--text)":"var(--sub)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ERR_LABELS[k]}</div>
-                <div style={{fontSize:10,color:"var(--muted)"}}>{ex.name} · {ex.muscle}</div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                <button onClick={()=>setErr(k,errors[k]-1)} disabled={errors[k]===0}
-                  style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:errors[k]>0?"var(--surface)":"none",color:errors[k]>0?"var(--text)":"var(--muted)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-                <span className="display" style={{fontSize:22,fontWeight:700,color:errors[k]>0?"var(--red)":"var(--muted)",minWidth:20,textAlign:"center"}}>{errors[k]}</span>
-                <button onClick={()=>setErr(k,errors[k]+1)}
-                  style={{width:28,height:28,borderRadius:6,border:"1px solid rgba(255,71,87,.4)",background:"rgba(255,71,87,.1)",color:"var(--red)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
-              </div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>setStep("mode")} style={{flex:1,padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--muted)",fontSize:14}}>← Atrás</button>
+            <button onClick={()=>area&&setStep("config")} disabled={!area}
+              style={{flex:2,padding:"12px",borderRadius:10,border:"none",background:area?"var(--blue)":"var(--border)",color:area?"#fff":"var(--muted)",fontSize:14,fontWeight:700}}>
+              CONTINUAR →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: Config */}
+      {step==="config"&&(
+        <div className="au">
+          <PlayerConfig player={p1} onChange={setP1} label={mode==="coop"?"Jugador 1":"Tú"} color={COLORS[0]}/>
+          {mode==="coop"&&<>
+            <div style={{height:1,background:"var(--border)",margin:"8px 0 16px"}}/>
+            <PlayerConfig player={p2} onChange={setP2} label="Jugador 2" color={COLORS[1]}/>
+          </>}
+          <div style={{display:"flex",gap:10,marginTop:8}}>
+            <button onClick={()=>setStep("area")} style={{flex:1,padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--muted)",fontSize:14}}>← Atrás</button>
+            <button onClick={()=>setStep("preview")}
+              style={{flex:2,padding:"12px",borderRadius:10,border:"none",background:"var(--orange)",color:"#fff",fontSize:14,fontWeight:700}}>
+              VER PLAN →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 4: Preview */}
+      {step==="preview"&&(
+        <div className="au">
+          {players.map((p,pi)=>(
+            <div key={pi} style={{marginBottom:20}}>
+              {players.length>1&&(
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:p.color}}/>
+                  <div className="D" style={{fontSize:18,fontWeight:800,color:p.color}}>{p.name}</div>
+                  <div style={{fontSize:12,color:"var(--muted)",marginLeft:4}}>
+                    {RANKS.find(r=>r.id===(pi===0?p1.rankId:p2.rankId))?.label} · {AREAS.find(a=>a.id===area)?.label}
+                  </div>
+                </div>
+              )}
+              {p.plan.length===0
+                ?<div style={{padding:"14px",background:"var(--card)",borderRadius:10,fontSize:13,color:"var(--muted)",textAlign:"center",border:"1px solid var(--border)"}}>
+                  Sin errores registrados — ¡buena sesión!
+                </div>
+                :p.plan.map(ex=>(
+                  <div key={ex.exId} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card)",borderRadius:8,border:"1px solid var(--border)",marginBottom:6}}>
+                    <span style={{fontSize:20}}>{ex.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600}}>{ex.name}</div>
+                      <div style={{fontSize:10,color:"var(--muted)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.errLabels?.join(" · ")}</div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div className="D" style={{fontSize:18,fontWeight:700,color:p.color}}>{ex.sets}×{ex.baseReps}</div>
+                      <div style={{fontSize:10,color:"var(--muted)"}}>{ex.unit}</div>
+                    </div>
+                  </div>
+                ))
+              }
+              {p.plan.length>0&&<div style={{fontSize:11,color:"var(--muted)",textAlign:"right",marginTop:4,paddingRight:4}}>
+                {p.plan.reduce((a,e)=>a+e.sets,0)} series · ~{Math.round(p.plan.reduce((a,e)=>a+e.sets,0)*1.5)} min
+              </div>}
             </div>
           ))}
-          {/* Hits */}
-          <div style={{display:"flex",alignItems:"center",gap:10,marginTop:10,padding:"10px 14px",background:"rgba(57,217,138,.05)",borderRadius:8,border:"1px solid rgba(57,217,138,.2)"}}>
-            <span style={{fontSize:20,width:26,textAlign:"center"}}>✓</span>
-            <div style={{flex:1}}>
-              <div style={{fontSize:13,fontWeight:600,color:"var(--green)"}}>Aciertos totales</div>
-              <div style={{fontSize:11,color:"var(--muted)"}}>Cada {HIT_REDUCTION} aciertos = −1 serie</div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <button onClick={()=>setHits(h=>Math.max(0,h-1))} style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--sub)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-              <span className="display" style={{fontSize:22,fontWeight:700,color:"var(--green)",minWidth:20,textAlign:"center"}}>{hits}</span>
-              <button onClick={()=>setHits(h=>h+1)} style={{width:28,height:28,borderRadius:6,border:"1px solid rgba(57,217,138,.4)",background:"rgba(57,217,138,.1)",color:"var(--green)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
-            </div>
+
+          <div style={{display:"flex",gap:10,marginTop:8}}>
+            <button onClick={()=>setStep("config")} style={{flex:1,padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--muted)",fontSize:14}}>← Ajustar</button>
+            <button onClick={()=>onStart(players)} disabled={!canStart}
+              style={{flex:2,padding:"14px",borderRadius:12,border:"none",
+                background:canStart?"linear-gradient(135deg,var(--orange),var(--red))":"var(--border)",
+                color:canStart?"#fff":"var(--muted)",fontSize:16,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:1}}>
+              EMPEZAR →
+            </button>
           </div>
         </div>
-      )}
-
-      {/* Plan preview */}
-      {plan.length>0&&(
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Plan generado</div>
-          {reduction>0&&<div style={{fontSize:12,color:"var(--green)",background:"rgba(57,217,138,.08)",border:"1px solid rgba(57,217,138,.25)",borderRadius:6,padding:"6px 12px",marginBottom:8}}>
-            🎉 {hits} aciertos → −{reduction} {reduction===1?"serie":"series"}
-          </div>}
-          {plan.map((ex)=>(
-            <div key={ex.errId} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card)",borderRadius:8,border:"1px solid var(--border)",marginBottom:6}}>
-              <span style={{fontSize:20}}>{ex.icon}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:600}}>{ex.name}</div>
-                <div style={{fontSize:11,color:"var(--muted)"}}>{ERR_LABELS[ex.errId]||ex.muscle}</div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div className="display" style={{fontSize:18,fontWeight:700,color:"var(--orange)"}}>{ex.sets}×{ex.reps}</div>
-                <div style={{fontSize:10,color:"var(--muted)"}}>{ex.unit} · {ex.rest}s desc.</div>
-              </div>
-            </div>
-          ))}
-          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 14px",fontSize:12,color:"var(--sub)",background:"var(--surface)",borderRadius:8,marginTop:4}}>
-            <span>{plan.length} ejercicios</span>
-            <span>{totalSets} series · ~{Math.round(totalSets*1.5)} min</span>
-          </div>
-        </div>
-      )}
-
-      {plan.length===0&&mode&&totalErrors===0&&(
-        <div style={{textAlign:"center",padding:"24px 0",color:"var(--muted)",fontSize:14}}>Sin errores registrados — ¡buena sesión! Añade algunos para generar el workout.</div>
-      )}
-
-      {plan.length>0&&(
-        <button onClick={()=>onStart(plan,errors,hits)}
-          style={{width:"100%",padding:"18px",borderRadius:12,border:"none",
-            background:"linear-gradient(135deg,var(--orange),var(--red))",
-            color:"#fff",fontSize:20,fontWeight:900,fontFamily:"'Barlow Condensed',sans-serif",
-            letterSpacing:2,boxShadow:"0 8px 32px rgba(255,107,53,.3)"}}>
-          EMPEZAR ENTRENAMIENTO →
-        </button>
       )}
     </div>
   );
 }
 
-// ── HISTORY ──────────────────────────────────────────────────────────────────
-function HistoryScreen({history, onBack}){
+// ── HISTORY ───────────────────────────────────────────────────────────────────
+function HistoryScreen({history,onBack}){
   if(history.length===0)return(
     <div style={{padding:24,textAlign:"center",paddingTop:60}}>
       <div style={{fontSize:48,marginBottom:12}}>📋</div>
-      <div className="display" style={{fontSize:28,fontWeight:800,color:"var(--sub)"}}>Sin historial</div>
+      <div className="D" style={{fontSize:28,fontWeight:800,color:"var(--sub)"}}>Sin historial</div>
       <div style={{fontSize:13,color:"var(--muted)",marginTop:8,marginBottom:24}}>Completa tu primer workout para verlo aquí</div>
       <button onClick={onBack} style={{padding:"10px 24px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13}}>← Volver</button>
     </div>
   );
   return(
-    <div style={{maxWidth:540,margin:"0 auto",padding:"24px 16px"}}>
+    <div style={{maxWidth:520,margin:"0 auto",padding:"20px 16px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
         <button onClick={onBack} style={{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"6px 12px",color:"var(--sub)",fontSize:13,cursor:"pointer"}}>← Volver</button>
-        <div className="display" style={{fontSize:28,fontWeight:800}}>Historial</div>
+        <div className="D" style={{fontSize:28,fontWeight:800}}>Historial</div>
       </div>
       {[...history].reverse().map((entry,i)=>(
         <div key={i} style={{background:"var(--card)",borderRadius:10,padding:"14px 16px",marginBottom:8,border:"1px solid var(--border)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
             <div>
               <div style={{fontSize:13,fontWeight:700}}>{entry.date}</div>
-              <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{entry.exercises} ejercicios · {entry.sets} series</div>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{entry.mode==="coop"?"👥 Cooperativo":"👤 Individual"} · {entry.exercises} ejercicios · {entry.sets} series</div>
             </div>
-            <div className="display" style={{fontSize:28,fontWeight:900,color:entry.completed?"var(--green)":"var(--muted)"}}>
-              {entry.completed?"✓":"✕"}
-            </div>
+            <div className="D" style={{fontSize:26,fontWeight:900,color:entry.completed?"var(--green)":"var(--muted)"}}>{entry.completed?"✓":"✕"}</div>
           </div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {entry.plan?.map(ex=>(
-              <span key={ex.errId} style={{fontSize:11,padding:"3px 8px",borderRadius:4,background:"var(--surface)",color:"var(--sub)",border:"1px solid var(--border)"}}>
-                {ex.icon} {ex.sets}×{ex.reps}
+            {entry.plan?.map((ex,j)=>(
+              <span key={j} style={{fontSize:11,padding:"3px 8px",borderRadius:4,background:"var(--surface)",color:"var(--sub)",border:"1px solid var(--border)"}}>
+                {ex.icon} {ex.sets}×{ex.baseReps}
               </span>
             ))}
           </div>
@@ -482,15 +676,19 @@ function HistoryScreen({history, onBack}){
 // ── APP ───────────────────────────────────────────────────────────────────────
 function App(){
   const [screen,setScreen]=useState("setup");
-  const [plan,setPlan]=useState([]);
+  const [players,setPlayers]=useState([]);
   const [history,setHistory]=useState(loadHistory);
 
-  const startWorkout=(p)=>{setPlan(p);setScreen("execution");};
+  const startWorkout=(p)=>{setPlayers(p);setScreen("execution");};
   const finishWorkout=(completed=true)=>{
+    const allPlans=players.flatMap(p=>p.plan);
     const entry={
       date:new Date().toLocaleDateString("es-ES")+" · "+new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),
-      exercises:plan.length,sets:plan.reduce((a,e)=>a+e.sets,0),completed,
-      plan:plan.map(e=>({errId:e.errId,icon:e.icon,sets:e.sets,reps:e.reps,unit:e.unit}))
+      mode:players.length>1?"coop":"individual",
+      exercises:allPlans.length,
+      sets:allPlans.reduce((a,e)=>a+e.sets,0),
+      completed,
+      plan:allPlans.map(e=>({exId:e.exId,icon:e.icon,sets:e.sets,baseReps:e.baseReps,unit:e.unit}))
     };
     const newH=[...history,entry];
     setHistory(newH);saveHistory(newH);
@@ -499,10 +697,9 @@ function App(){
 
   return(
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
-      {/* Top bar */}
-      <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(10,10,15,.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--border)",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{display:"flex",alignItems:"center",gap:16}}>
-          <div className="display" style={{fontSize:17,fontWeight:800,letterSpacing:1}}>🏋️ RL WORKOUT</div>
+      <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(10,10,15,.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--border)",padding:"9px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div className="D" style={{fontSize:16,fontWeight:800,letterSpacing:.5}}>🏋️ RL WORKOUT</div>
           <a href="../" style={{fontSize:11,color:"var(--muted)",textDecoration:"none",border:"1px solid var(--border)",borderRadius:5,padding:"3px 8px"}}
             onMouseEnter={e=>e.currentTarget.style.color="var(--sub)"}
             onMouseLeave={e=>e.currentTarget.style.color="var(--muted)"}>
@@ -510,17 +707,16 @@ function App(){
           </a>
         </div>
         <div style={{display:"flex",gap:6}}>
-          {[["setup","Workout"],["history",`Historial${history.length>0?" ("+history.length+")":""}`]].map(([s,label])=>(
+          {[["setup","Workout"],["history",`Historial${history.length>0?" ("+history.length+")":""}`]].map(([s,lbl])=>(
             <button key={s} onClick={()=>setScreen(s)}
-              style={{padding:"6px 12px",borderRadius:6,border:`1px solid ${screen===s?"var(--orange)":"var(--border)"}`,background:screen===s?"rgba(255,107,53,.1)":"none",color:screen===s?"var(--orange)":"var(--sub)",fontSize:12,cursor:"pointer"}}>
-              {label}
+              style={{padding:"5px 11px",borderRadius:6,border:`1px solid ${screen===s?"var(--orange)":"var(--border)"}`,background:screen===s?"rgba(255,107,53,.1)":"none",color:screen===s?"var(--orange)":"var(--sub)",fontSize:12,cursor:"pointer"}}>
+              {lbl}
             </button>
           ))}
         </div>
       </div>
-
       {screen==="setup"&&<SetupScreen onStart={startWorkout}/>}
-      {screen==="execution"&&<ExecutionScreen plan={plan} onFinish={finishWorkout}/>}
+      {screen==="execution"&&<ExecutionScreen players={players} onFinish={finishWorkout}/>}
       {screen==="history"&&<HistoryScreen history={history} onBack={()=>setScreen("setup")}/>}
     </div>
   );
