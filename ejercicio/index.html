@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🏋️ RL Workout</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    :root{
+      --bg:#0a0a0f;--surface:#13131c;--card:#1a1a26;--border:#252535;
+      --text:#f0f0f8;--sub:#9090b0;--muted:#505068;
+      --green:#39d98a;--red:#ff4757;--amber:#ffd32a;--blue:#5352ed;
+      --orange:#ff6b35;--purple:#a55eea;
+    }
+    body{background:var(--bg);font-family:'Barlow',sans-serif;color:var(--text);min-height:100vh;}
+    button{cursor:pointer;font-family:'Barlow',sans-serif;}
+    button:active{transform:scale(.97);}
+    input{font-family:'Barlow',sans-serif;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+    .display{font-family:'Barlow Condensed',sans-serif;}
+    @keyframes slideUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+    .animate-in{animation:slideUp .25s ease forwards;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState, useEffect, useRef} = React;
+
+// ── EXERCISE DEFINITIONS ─────────────────────────────────────────────────────
+// Keys match exactly RL Tracker error IDs
+const EXERCISES = {
+  whiff:      {name:"Mountain Climbers",  icon:"🧗", muscle:"Core + Coordinación",   unit:"reps", baseReps:20, baseSets:2, rest:45,  desc:"Desde plancha, lleva rodillas al pecho alternando rápido"},
+  overcommit: {name:"Squat Jumps",        icon:"⚡", muscle:"Piernas + Explosividad", unit:"reps", baseReps:12, baseSets:2, rest:60,  desc:"Sentadilla profunda, salta al subir, aterriza suave"},
+  rotacion:   {name:"Russian Twists",     icon:"🔄", muscle:"Core + Rotación",        unit:"reps", baseReps:20, baseSets:2, rest:40,  desc:"Sentado, pies levantados, gira tocando el suelo a cada lado"},
+  open_net:   {name:"Burpees",            icon:"💥", muscle:"Full Body + Resistencia", unit:"reps", baseReps:8,  baseSets:2, rest:75,  desc:"Plancha – push-up – salto. El rey del castigo"},
+  kickoff:    {name:"Jumping Jacks",      icon:"🦘", muscle:"Cardio + Explosividad",  unit:"reps", baseReps:30, baseSets:2, rest:30,  desc:"Saltos abriendo brazos y piernas. Rítmico y constante"},
+  boost:      {name:"Plancha Isométrica", icon:"🧱", muscle:"Core + Estabilidad",     unit:"seg",  baseReps:30, baseSets:2, rest:40,  desc:"Codos al suelo, cuerpo recto. Aguanta cada segundo"},
+  // Special mode errors
+  posicion:   {name:"Zancadas Laterales", icon:"↔️", muscle:"Piernas + Agilidad",     unit:"reps", baseReps:16, baseSets:2, rest:45,  desc:"Paso lateral amplio, baja la cadera, alterna lados"},
+  timing:     {name:"Saltos al Cajón",    icon:"📦", muscle:"Piernas + Timing",       unit:"reps", baseReps:10, baseSets:2, rest:60,  desc:"Salta con los dos pies a una superficie elevada y baja controlado"},
+  cincuenta:  {name:"Push-ups",           icon:"💪", muscle:"Pecho + Core",           unit:"reps", baseReps:15, baseSets:2, rest:45,  desc:"Manos a la anchura de hombros, pecho al suelo, sube fuerte"},
+};
+
+const HIT_REDUCTION = 3;
+const WKEY = 'rlw_history';
+function loadHistory(){ try{const s=localStorage.getItem(WKEY);return s?JSON.parse(s):[];}catch{return[];} }
+function saveHistory(h){ localStorage.setItem(WKEY,JSON.stringify(h)); }
+
+function getAllSessions(){
+  // Try both rlt3_s (your version) and rlt3f_s (friend version)
+  for(const key of ['rlt3_s','rlt3f_s']){
+    try{
+      const raw=localStorage.getItem(key);
+      if(raw){const d=JSON.parse(raw);if(d&&d.length>0)return d;}
+    }catch{}
+  }
+  return [];
+}
+
+function calcWorkout(errors, totalHits){
+  const reduction = Math.floor(totalHits / HIT_REDUCTION);
+  const plan = [];
+  Object.entries(errors).forEach(([errId, count]) => {
+    if(count<=0) return;
+    const ex = EXERCISES[errId];
+    if(!ex) return;
+    plan.push({ errId, ...ex, sets: Math.min(5, ex.baseSets + count - 1) });
+  });
+  // Apply hit reduction
+  let toReduce = Math.min(reduction, plan.reduce((a,e)=>a+e.sets,0) - plan.length);
+  const sorted = [...plan].sort((a,b)=>b.sets-a.sets);
+  for(const ex of sorted){
+    if(toReduce<=0) break;
+    const orig = plan.find(p=>p.errId===ex.errId);
+    const reduce = Math.min(orig.sets-1, toReduce);
+    orig.sets -= reduce;
+    toReduce -= reduce;
+  }
+  return plan.filter(p=>p.sets>0);
+}
+
+function applySession(session){
+  const errors = {};
+  const allErrIds = Object.keys(EXERCISES);
+  let totalErr = {};
+  session.matches?.forEach(m=>{
+    Object.entries(m.errors||{}).forEach(([k,v])=>{ totalErr[k]=(totalErr[k]||0)+v; });
+  });
+  allErrIds.forEach(k=>{ errors[k]=totalErr[k]||0; });
+  let hits=0;
+  session.matches?.forEach(m=>{ Object.values(m.hits||{}).forEach(v=>{ hits+=v; }); });
+  return {errors, hits};
+}
+
+// ── TIMER ────────────────────────────────────────────────────────────────────
+function Timer({seconds, total, onDone, label, color="var(--green)"}){
+  const [left,setLeft]=useState(seconds);
+  useEffect(()=>{
+    const iv=setInterval(()=>setLeft(l=>{
+      if(l<=1){clearInterval(iv);onDone();return 0;}
+      return l-1;
+    }),1000);
+    return()=>clearInterval(iv);
+  },[]);
+  const r=72,circ=2*Math.PI*r,offset=circ-(left/total)*circ;
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:20}}>
+      <div style={{fontSize:13,fontWeight:600,color:"var(--sub)",textTransform:"uppercase",letterSpacing:2}}>{label}</div>
+      <div style={{width:160,height:160,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",position:"relative"}}>
+        <svg width="160" height="160" viewBox="0 0 160 160" style={{position:"absolute",top:0,left:0,transform:"rotate(-90deg)"}}>
+          <circle cx="80" cy="80" r={r} fill="none" stroke="var(--border)" strokeWidth="6"/>
+          <circle cx="80" cy="80" r={r} fill="none" stroke={color} strokeWidth="6"
+            strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+            style={{transition:"stroke-dashoffset .9s linear"}}/>
+        </svg>
+        <div style={{position:"relative",zIndex:1,textAlign:"center"}}>
+          <div className="display" style={{fontSize:56,fontWeight:900,lineHeight:1,color}}>{left}</div>
+          <div style={{fontSize:12,color:"var(--muted)"}}>segundos</div>
+        </div>
+      </div>
+      <button onClick={onDone} style={{padding:"8px 24px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13}}>Saltar →</button>
+    </div>
+  );
+}
+
+function SetDots({current, total, color}){
+  return(
+    <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+      {Array.from({length:total}).map((_,i)=>(
+        <div key={i} style={{width:12,height:12,borderRadius:3,background:i<current?color:"var(--border)",border:`1px solid ${i<current?color:"var(--border)"}`,transition:"background .2s"}}/>
+      ))}
+    </div>
+  );
+}
+
+// ── EXECUTION ────────────────────────────────────────────────────────────────
+function ExecutionScreen({plan, onFinish}){
+  const [exIdx,setExIdx]=useState(0);
+  const [setNum,setSetNum]=useState(1);
+  const [phase,setPhase]=useState("intro");
+  const [doneSets,setDoneSets]=useState(0);
+  const ex=plan[exIdx];
+  const totalSets=plan.reduce((a,e)=>a+e.sets,0);
+  const pct=totalSets>0?Math.round((doneSets/totalSets)*100):0;
+
+  const finishSet=()=>{
+    setDoneSets(d=>d+1);
+    if(setNum<ex.sets){setSetNum(s=>s+1);setPhase("rest");}
+    else if(exIdx+1<plan.length){setExIdx(i=>i+1);setSetNum(1);setPhase("rest");}
+    else setPhase("done");
+  };
+
+  if(phase==="done")return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
+      <div style={{fontSize:72,marginBottom:16}}>🏆</div>
+      <div className="display" style={{fontSize:52,fontWeight:900,color:"var(--green)",marginBottom:8}}>¡COMPLETADO!</div>
+      <div style={{fontSize:16,color:"var(--sub)",marginBottom:32}}>{totalSets} series · {plan.length} ejercicios</div>
+      <button onClick={()=>onFinish(true)} style={{padding:"14px 36px",borderRadius:10,border:"none",background:"var(--green)",color:"#000",fontSize:16,fontWeight:700}}>Ver historial →</button>
+    </div>
+  );
+
+  if(phase==="rest")return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,gap:12}}>
+      <Timer seconds={ex.rest} total={ex.rest} onDone={()=>setPhase("intro")} label="Descanso" color="var(--amber)"/>
+      {exIdx+1<plan.length&&setNum>=ex.sets&&<div style={{fontSize:13,color:"var(--sub)"}}>Siguiente: <strong>{plan[exIdx+1]?.name}</strong></div>}
+    </div>
+  );
+
+  return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",padding:24}}>
+      <div style={{marginBottom:24}}>
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--muted)",marginBottom:6}}>
+          <span>Ejercicio {exIdx+1} de {plan.length}</span>
+          <span>{pct}% completado</span>
+        </div>
+        <div style={{height:3,background:"var(--border)",borderRadius:2}}>
+          <div style={{height:"100%",width:`${pct}%`,background:"var(--green)",borderRadius:2,transition:"width .4s"}}/>
+        </div>
+      </div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:20,textAlign:"center"}}>
+        <div style={{fontSize:64}}>{ex.icon}</div>
+        <div>
+          <div className="display" style={{fontSize:42,fontWeight:900,lineHeight:1}}>{ex.name}</div>
+          <div style={{fontSize:13,color:"var(--sub)",marginTop:4}}>{ex.muscle}</div>
+        </div>
+        <div style={{display:"flex",gap:24,alignItems:"center"}}>
+          <div style={{textAlign:"center"}}>
+            <div className="display" style={{fontSize:52,fontWeight:900,color:"var(--orange)"}}>{ex.reps}</div>
+            <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase"}}>{ex.unit}</div>
+          </div>
+          <div style={{width:1,height:48,background:"var(--border)"}}/>
+          <div style={{textAlign:"center"}}>
+            <div className="display" style={{fontSize:28,fontWeight:700,color:"var(--sub)"}}>Serie {setNum}/{ex.sets}</div>
+          </div>
+        </div>
+        <SetDots current={setNum-1} total={ex.sets} color="var(--orange)"/>
+        <div style={{background:"var(--card)",borderRadius:10,padding:"10px 18px",fontSize:13,color:"var(--sub)",maxWidth:300,lineHeight:1.6,border:"1px solid var(--border)"}}>{ex.desc}</div>
+        {ex.unit==="seg"
+          ?<Timer seconds={ex.reps} total={ex.reps} onDone={finishSet} label="Aguanta" color="var(--orange)"/>
+          :<button onClick={finishSet} style={{padding:"16px 48px",borderRadius:12,border:"none",background:"var(--orange)",color:"#fff",fontSize:18,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:1}}>
+            ✓ SERIE COMPLETA
+          </button>}
+      </div>
+    </div>
+  );
+}
+
+// ── SESSION PICKER ───────────────────────────────────────────────────────────
+function SessionPicker({sessions, onSelect, onClose}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center",padding:16}} onClick={onClose}>
+      <div style={{background:"var(--surface)",borderRadius:"16px 16px 12px 12px",width:"100%",maxWidth:520,maxHeight:"70vh",overflow:"auto",border:"1px solid var(--border)"}} onClick={e=>e.stopPropagation()}>
+        <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:"var(--surface)"}}>
+          <div style={{fontSize:15,fontWeight:700}}>Seleccionar sesión</div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--muted)",fontSize:20,cursor:"pointer"}}>✕</button>
+        </div>
+        {sessions.length===0
+          ?<div style={{padding:32,textAlign:"center",color:"var(--muted)",fontSize:13}}>No hay sesiones en RL Tracker. Añade errores manualmente.</div>
+          :sessions.slice(0,10).map((s,i)=>{
+            const totalErr=s.matches?.reduce((a,m)=>a+Object.values(m.errors||{}).reduce((x,y)=>x+y,0),0)||0;
+            const totalHits=s.matches?.reduce((a,m)=>a+Object.values(m.hits||{}).reduce((x,y)=>x+y,0),0)||0;
+            return(
+              <button key={i} onClick={()=>onSelect(s)}
+                style={{display:"flex",alignItems:"center",gap:14,width:"100%",padding:"14px 20px",border:"none",borderBottom:"1px solid var(--border)",background:"none",cursor:"pointer",textAlign:"left"}}
+                onMouseEnter={e=>e.currentTarget.style.background="var(--card)"}
+                onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{s.modeName}</div>
+                  <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.date}{s.time&&s.time!=="Posicionamiento"?` · ${s.time}`:""} · {s.matches?.length||0}p</div>
+                </div>
+                <div style={{display:"flex",gap:12,flexShrink:0}}>
+                  {totalErr>0&&<span style={{fontSize:12,color:"var(--red)",fontWeight:600}}>{totalErr} err</span>}
+                  {totalHits>0&&<span style={{fontSize:12,color:"var(--green)",fontWeight:600}}>{totalHits} ✓</span>}
+                  {totalErr===0&&<span style={{fontSize:12,color:"var(--muted)"}}>Sin errores</span>}
+                </div>
+                <span style={{color:"var(--muted)",fontSize:16}}>›</span>
+              </button>
+            );
+          })
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── SETUP ────────────────────────────────────────────────────────────────────
+function SetupScreen({onStart}){
+  const [mode,setMode]=useState(null);
+  const [errors,setErrors]=useState(()=>Object.fromEntries(Object.keys(EXERCISES).map(k=>[k,0])));
+  const [hits,setHits]=useState(0);
+  const [sessionInfo,setSessionInfo]=useState(null);
+  const [showPicker,setShowPicker]=useState(false);
+  const [sessions,setSessions]=useState([]);
+  const [fileError,setFileError]=useState('');
+
+  useEffect(()=>{
+    const s=getAllSessions();
+    setSessions(s);
+    if(s.length>0&&mode===null){
+      const {errors:e,hits:h}=applySession(s[0]);
+      setErrors(e);setHits(h);setSessionInfo(s[0]);setMode('auto');
+    }
+  },[]);
+
+  const selectSession=(s)=>{
+    const {errors:e,hits:h}=applySession(s);
+    setErrors(e);setHits(h);setSessionInfo(s);setMode('auto');setShowPicker(false);
+  };
+
+  const handleFile=(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const data=JSON.parse(ev.target.result);
+        const s=data.sessions||data.rlt3_s||data.rlt3f_s||(Array.isArray(data)?data:null);
+        if(s&&s.length>0){setSessions(s);selectSession(s[0]);setFileError('');}
+        else setFileError('No se encontraron sesiones.');
+      }catch{setFileError('Archivo JSON inválido.');}
+    };
+    reader.readAsText(file);
+  };
+
+  const setErr=(k,v)=>setErrors(prev=>({...prev,[k]:Math.max(0,v)}));
+  const plan=calcWorkout(errors,hits);
+  const totalErrors=Object.values(errors).reduce((a,b)=>a+b,0);
+  const reduction=Math.floor(hits/HIT_REDUCTION);
+  const totalSets=plan.reduce((a,e)=>a+e.sets,0);
+
+  const ERR_LABELS={
+    whiff:"Whiff en Aerial", overcommit:"Overcommit / Doble Commit", rotacion:"Mala Rotación",
+    open_net:"Open Net Fallado", kickoff:"Kickoff Perdido", boost:"Boost Mal Gestionado",
+    posicion:"Error de Posicionamiento", timing:"Mal Timing en Remate", cincuenta:"Perdiste el 50/50"
+  };
+
+  return(
+    <div style={{maxWidth:540,margin:"0 auto",padding:"24px 16px 80px"}}>
+      {showPicker&&<SessionPicker sessions={sessions} onSelect={selectSession} onClose={()=>setShowPicker(false)}/>}
+
+      <div style={{textAlign:"center",marginBottom:28,paddingTop:8}}>
+        <div style={{fontSize:44,marginBottom:8}}>🏋️</div>
+        <div className="display" style={{fontSize:38,fontWeight:900,letterSpacing:-1}}>RL WORKOUT</div>
+        <div style={{fontSize:13,color:"var(--sub)",marginTop:4}}>Entrena tus errores de Rocket League</div>
+      </div>
+
+      {/* Source selector */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
+        {[["auto","⚡ Importar sesión","Desde RL Tracker"],["manual","✏️ Manual","Introduce errores tú"]]
+          .map(([m,label,desc])=>(
+          <button key={m} onClick={()=>setMode(m)}
+            style={{padding:"12px",borderRadius:10,border:`2px solid ${mode===m?"var(--green)":"var(--border)"}`,
+              background:mode===m?"rgba(57,217,138,.08)":"var(--card)",
+              color:mode===m?"var(--green)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
+            <div style={{fontSize:14,fontWeight:700,marginBottom:2}}>{label}</div>
+            <div style={{fontSize:11,color:"var(--muted)"}}>{desc}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* Auto mode */}
+      {mode==="auto"&&(
+        <div style={{marginBottom:20}}>
+          {sessionInfo?(
+            <div style={{background:"rgba(57,217,138,.06)",border:"1px solid rgba(57,217,138,.3)",borderRadius:10,padding:"12px 16px",marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{color:"var(--green)",fontWeight:700,fontSize:13}}>✓ Sesión cargada</div>
+                <button onClick={()=>setShowPicker(true)}
+                  style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--green)",background:"none",color:"var(--green)",fontSize:11,cursor:"pointer"}}>
+                  Cambiar →
+                </button>
+              </div>
+              <div style={{fontSize:13,color:"var(--sub)"}}>{sessionInfo.modeName} · {sessionInfo.date}</div>
+              <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
+                {sessionInfo.matches?.length||0} partidas · <span style={{color:"var(--red)"}}>{totalErrors} errores</span> · <span style={{color:"var(--green)"}}>{hits} aciertos</span>
+              </div>
+            </div>
+          ):(
+            <div style={{marginBottom:12}}>
+              <button onClick={()=>setShowPicker(true)}
+                style={{width:"100%",padding:"12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card)",color:"var(--sub)",fontSize:13,cursor:"pointer",marginBottom:10}}>
+                📋 Seleccionar sesión de RL Tracker
+              </button>
+              <div style={{fontSize:12,color:"var(--muted)",marginBottom:8,textAlign:"center"}}>o importa el JSON de backup:</div>
+              <label style={{display:"block",padding:"10px",border:"1px dashed var(--border)",borderRadius:8,textAlign:"center",cursor:"pointer",fontSize:13,color:"var(--sub)"}}>
+                📦 Seleccionar archivo JSON
+                <input type="file" accept=".json" onChange={handleFile} style={{display:"none"}}/>
+              </label>
+              {fileError&&<div style={{fontSize:12,color:"var(--red)",marginTop:6}}>{fileError}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Error inputs */}
+      {(mode==="manual"||(mode==="auto"&&sessionInfo))&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>
+            {mode==="manual"?"Errores de tu sesión":"Ajustar errores"}
+          </div>
+          {Object.entries(EXERCISES).map(([k,ex])=>(
+            <div key={k} style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,padding:"10px 14px",background:"var(--card)",borderRadius:8,border:`1px solid ${errors[k]>0?"rgba(255,71,87,.35)":"var(--border)"}`}}>
+              <span style={{fontSize:20,width:26,textAlign:"center"}}>{ex.icon}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:errors[k]>0?"var(--text)":"var(--sub)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ERR_LABELS[k]}</div>
+                <div style={{fontSize:10,color:"var(--muted)"}}>{ex.name} · {ex.muscle}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                <button onClick={()=>setErr(k,errors[k]-1)} disabled={errors[k]===0}
+                  style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:errors[k]>0?"var(--surface)":"none",color:errors[k]>0?"var(--text)":"var(--muted)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                <span className="display" style={{fontSize:22,fontWeight:700,color:errors[k]>0?"var(--red)":"var(--muted)",minWidth:20,textAlign:"center"}}>{errors[k]}</span>
+                <button onClick={()=>setErr(k,errors[k]+1)}
+                  style={{width:28,height:28,borderRadius:6,border:"1px solid rgba(255,71,87,.4)",background:"rgba(255,71,87,.1)",color:"var(--red)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+              </div>
+            </div>
+          ))}
+          {/* Hits */}
+          <div style={{display:"flex",alignItems:"center",gap:10,marginTop:10,padding:"10px 14px",background:"rgba(57,217,138,.05)",borderRadius:8,border:"1px solid rgba(57,217,138,.2)"}}>
+            <span style={{fontSize:20,width:26,textAlign:"center"}}>✓</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,color:"var(--green)"}}>Aciertos totales</div>
+              <div style={{fontSize:11,color:"var(--muted)"}}>Cada {HIT_REDUCTION} aciertos = −1 serie</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <button onClick={()=>setHits(h=>Math.max(0,h-1))} style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--sub)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+              <span className="display" style={{fontSize:22,fontWeight:700,color:"var(--green)",minWidth:20,textAlign:"center"}}>{hits}</span>
+              <button onClick={()=>setHits(h=>h+1)} style={{width:28,height:28,borderRadius:6,border:"1px solid rgba(57,217,138,.4)",background:"rgba(57,217,138,.1)",color:"var(--green)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Plan preview */}
+      {plan.length>0&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:10}}>Plan generado</div>
+          {reduction>0&&<div style={{fontSize:12,color:"var(--green)",background:"rgba(57,217,138,.08)",border:"1px solid rgba(57,217,138,.25)",borderRadius:6,padding:"6px 12px",marginBottom:8}}>
+            🎉 {hits} aciertos → −{reduction} {reduction===1?"serie":"series"}
+          </div>}
+          {plan.map((ex)=>(
+            <div key={ex.errId} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card)",borderRadius:8,border:"1px solid var(--border)",marginBottom:6}}>
+              <span style={{fontSize:20}}>{ex.icon}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:600}}>{ex.name}</div>
+                <div style={{fontSize:11,color:"var(--muted)"}}>{ERR_LABELS[ex.errId]||ex.muscle}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div className="display" style={{fontSize:18,fontWeight:700,color:"var(--orange)"}}>{ex.sets}×{ex.reps}</div>
+                <div style={{fontSize:10,color:"var(--muted)"}}>{ex.unit} · {ex.rest}s desc.</div>
+              </div>
+            </div>
+          ))}
+          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 14px",fontSize:12,color:"var(--sub)",background:"var(--surface)",borderRadius:8,marginTop:4}}>
+            <span>{plan.length} ejercicios</span>
+            <span>{totalSets} series · ~{Math.round(totalSets*1.5)} min</span>
+          </div>
+        </div>
+      )}
+
+      {plan.length===0&&mode&&totalErrors===0&&(
+        <div style={{textAlign:"center",padding:"24px 0",color:"var(--muted)",fontSize:14}}>Sin errores registrados — ¡buena sesión! Añade algunos para generar el workout.</div>
+      )}
+
+      {plan.length>0&&(
+        <button onClick={()=>onStart(plan,errors,hits)}
+          style={{width:"100%",padding:"18px",borderRadius:12,border:"none",
+            background:"linear-gradient(135deg,var(--orange),var(--red))",
+            color:"#fff",fontSize:20,fontWeight:900,fontFamily:"'Barlow Condensed',sans-serif",
+            letterSpacing:2,boxShadow:"0 8px 32px rgba(255,107,53,.3)"}}>
+          EMPEZAR ENTRENAMIENTO →
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── HISTORY ──────────────────────────────────────────────────────────────────
+function HistoryScreen({history, onBack}){
+  if(history.length===0)return(
+    <div style={{padding:24,textAlign:"center",paddingTop:60}}>
+      <div style={{fontSize:48,marginBottom:12}}>📋</div>
+      <div className="display" style={{fontSize:28,fontWeight:800,color:"var(--sub)"}}>Sin historial</div>
+      <div style={{fontSize:13,color:"var(--muted)",marginTop:8,marginBottom:24}}>Completa tu primer workout para verlo aquí</div>
+      <button onClick={onBack} style={{padding:"10px 24px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13}}>← Volver</button>
+    </div>
+  );
+  return(
+    <div style={{maxWidth:540,margin:"0 auto",padding:"24px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+        <button onClick={onBack} style={{background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"6px 12px",color:"var(--sub)",fontSize:13,cursor:"pointer"}}>← Volver</button>
+        <div className="display" style={{fontSize:28,fontWeight:800}}>Historial</div>
+      </div>
+      {[...history].reverse().map((entry,i)=>(
+        <div key={i} style={{background:"var(--card)",borderRadius:10,padding:"14px 16px",marginBottom:8,border:"1px solid var(--border)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700}}>{entry.date}</div>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{entry.exercises} ejercicios · {entry.sets} series</div>
+            </div>
+            <div className="display" style={{fontSize:28,fontWeight:900,color:entry.completed?"var(--green)":"var(--muted)"}}>
+              {entry.completed?"✓":"✕"}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {entry.plan?.map(ex=>(
+              <span key={ex.errId} style={{fontSize:11,padding:"3px 8px",borderRadius:4,background:"var(--surface)",color:"var(--sub)",border:"1px solid var(--border)"}}>
+                {ex.icon} {ex.sets}×{ex.reps}
+              </span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── APP ───────────────────────────────────────────────────────────────────────
+function App(){
+  const [screen,setScreen]=useState("setup");
+  const [plan,setPlan]=useState([]);
+  const [history,setHistory]=useState(loadHistory);
+
+  const startWorkout=(p)=>{setPlan(p);setScreen("execution");};
+  const finishWorkout=(completed=true)=>{
+    const entry={
+      date:new Date().toLocaleDateString("es-ES")+" · "+new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),
+      exercises:plan.length,sets:plan.reduce((a,e)=>a+e.sets,0),completed,
+      plan:plan.map(e=>({errId:e.errId,icon:e.icon,sets:e.sets,reps:e.reps,unit:e.unit}))
+    };
+    const newH=[...history,entry];
+    setHistory(newH);saveHistory(newH);
+    setScreen("setup");
+  };
+
+  return(
+    <div style={{minHeight:"100vh",background:"var(--bg)"}}>
+      {/* Top bar */}
+      <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(10,10,15,.92)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--border)",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:16}}>
+          <div className="display" style={{fontSize:17,fontWeight:800,letterSpacing:1}}>🏋️ RL WORKOUT</div>
+          <a href="../" style={{fontSize:11,color:"var(--muted)",textDecoration:"none",border:"1px solid var(--border)",borderRadius:5,padding:"3px 8px"}}
+            onMouseEnter={e=>e.currentTarget.style.color="var(--sub)"}
+            onMouseLeave={e=>e.currentTarget.style.color="var(--muted)"}>
+            🚗 RL Tracker
+          </a>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {[["setup","Workout"],["history",`Historial${history.length>0?" ("+history.length+")":""}`]].map(([s,label])=>(
+            <button key={s} onClick={()=>setScreen(s)}
+              style={{padding:"6px 12px",borderRadius:6,border:`1px solid ${screen===s?"var(--orange)":"var(--border)"}`,background:screen===s?"rgba(255,107,53,.1)":"none",color:screen===s?"var(--orange)":"var(--sub)",fontSize:12,cursor:"pointer"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {screen==="setup"&&<SetupScreen onStart={startWorkout}/>}
+      {screen==="execution"&&<ExecutionScreen plan={plan} onFinish={finishWorkout}/>}
+      {screen==="history"&&<HistoryScreen history={history} onBack={()=>setScreen("setup")}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
