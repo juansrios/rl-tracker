@@ -265,7 +265,21 @@ function is1v1(id){ return id==="1v1"; }
 
 const TOURNAMENT_ROUNDS = ["Fase de Grupos","Ronda de 16","Cuartos de Final","Semifinal","Final","Gran Final"];
 
-const SKEY="rlt3f_s", MKEY="rlt3f_m", TKEY="rlt3f_t", CKEY="rlt3f_cfg", XKEY="rlt3f_custom", MECKEY="rlt3f_mec";
+const SKEY="rlt3f_s", MKEY="rlt3f_m", TKEY="rlt3f_t", CKEY="rlt3f_cfg", XKEY="rlt3f_custom", MECKEY="rlt3f_mec", HLKEY="rlt3f_hl", TRAINKEY="rlt3f_train";
+
+function loadHighlights(){ try{const s=localStorage.getItem(HLKEY);return s?JSON.parse(s):{};}catch{return{};} }
+function saveHighlights(d){ try{localStorage.setItem(HLKEY,JSON.stringify(d));}catch{} }
+function loadTraining(){ try{const s=localStorage.getItem(TRAINKEY);return s?JSON.parse(s):null;}catch{return null;} }
+function saveTraining(d){ try{localStorage.setItem(TRAINKEY,JSON.stringify(d));}catch{} }
+
+function ytId(url){
+  try{
+    const u=new URL(url);
+    if(u.hostname.includes('youtu.be')) return u.pathname.slice(1).split('?')[0];
+    if(u.hostname.includes('youtube')) return u.searchParams.get('v');
+  }catch{}return null;
+}
+function ytThumb(id){ return `https://img.youtube.com/vi/${id}/mqdefault.jpg`; }
 function draftKey(modeId){ return 'rlt3f_draft_'+modeId; }
 function saveDraft(modeId, data){ try{ localStorage.setItem(draftKey(modeId), JSON.stringify(data)); }catch{} }
 function loadDraft(modeId){ try{ const s=localStorage.getItem(draftKey(modeId)); return s?JSON.parse(s):null; }catch{ return null; } }
@@ -782,8 +796,8 @@ function getCloudCfg() {
 }
 function saveCloudCfg(cfg) { localStorage.setItem(JKEY, JSON.stringify(cfg)); }
 
-function bundleData(sessions, mmrHist, tournaments, config) {
-  return { sessions, mmrHistory: mmrHist, tournaments, config, lastSync: Date.now() };
+function bundleData(sessions, mmrHist, tournaments, config, custom, mechanics) {
+  return { sessions, mmrHistory: mmrHist, tournaments, config, custom: custom||{}, mechanics: mechanics||{}, lastSync: Date.now() };
 }
 function unbundleData(record) {
   return {
@@ -791,6 +805,8 @@ function unbundleData(record) {
     mmrHistory:  record.mmrHistory  || {},
     tournaments: record.tournaments || [],
     config:      record.config      || {},
+    custom:      record.custom      || {},
+    mechanics:   record.mechanics   || {},
   };
 }
 
@@ -883,7 +899,7 @@ function CloudConfigModal({ onClose, onSaved }) {
 
         <div style={{marginBottom:20}}>
           <div style={{fontSize:12,color:C.muted,marginBottom:6}}>🤖 API Key de Claude (para resúmenes IA — opcional)</div>
-          <input value={aiKeyVal} onChange={e=>setAiKeyVal(e.target.value)} placeholder="Pegar API Key..."
+          <input value={aiKeyVal} onChange={e=>setAiKeyVal(e.target.value)} placeholder="sk-ant-..."
             style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:'8px 12px',color:C.text,fontSize:12,width:'100%',fontFamily:'monospace'}}/>
           <div style={{fontSize:11,color:C.muted,marginTop:4}}>Necesaria para los resúmenes automáticos por partida y sesión. Guárdala solo en este dispositivo.</div>
         </div>
@@ -1027,7 +1043,7 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
         <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:20,cursor:"pointer"}}>✕</button>
       </div>}
       <div style={{padding:"12px 8px",borderBottom:`1px solid ${C.border}`}}>
-        {[{id:"home",label:"Inicio",icon:"🏠"},{id:"stats",label:"Estadísticas",icon:"📊"},{id:"tournaments",label:"Torneos",icon:"🏆"},{id:"settings",label:"Configuración",icon:"⚙️"}].map(item=>(
+        {[{id:"home",label:"Inicio",icon:"🏠"},{id:"stats",label:"Estadísticas",icon:"📊"},{id:"highlights",label:"Highlights",icon:"🎬"},{id:"training",label:"Entrenamiento",icon:"🎯"},{id:"tournaments",label:"Torneos",icon:"🏆"},{id:"settings",label:"Configuración",icon:"⚙️"}].map(item=>(
           <button key={item.id} onClick={()=>nav(item.id)} title={!open?item.label:undefined}
             style={{display:"flex",alignItems:"center",gap:open?10:0,justifyContent:open?"flex-start":"center",width:"100%",padding:open?"8px 10px":"8px",borderRadius:6,border:"none",background:activePage===item.id?C.hover:"none",color:activePage===item.id?C.text:C.sub,fontSize:14,fontWeight:activePage===item.id?600:400,textAlign:"left",marginBottom:2}}>
             <span style={{fontSize:open?14:18}}>{item.icon}</span>
@@ -1082,6 +1098,10 @@ function Sidebar({activePage,onNavigate,sessions,mmrHistory,tournaments,config,s
             style={{width:'100%',marginTop:6,padding:'6px 4px',borderRadius:6,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:11,cursor:'pointer',fontWeight:500}}>
             📦 Importar / Exportar JSON
           </button>
+          {syncStatus==='error'&&cloudCfg&&<button onClick={onPullNow}
+            style={{width:'100%',marginTop:6,padding:'6px 4px',borderRadius:6,border:`1px solid ${C.red}`,background:`${C.red}10`,color:C.red,fontSize:11,cursor:'pointer',fontWeight:600}}>
+            ↺ Reintentar conexión
+          </button>}
         </>:<div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'center'}}>
           <button onClick={onOpenCloud} title="Config nube" style={{width:36,height:36,borderRadius:8,border:`1px solid ${cloudCfg?C.border:C.blue}`,background:cloudCfg?'none':`${C.blue}20`,color:cloudCfg?C.muted:C.blue,fontSize:14,cursor:'pointer'}}>☁</button>
           <button onClick={onOpenImport} title="Importar/Exportar" style={{width:36,height:36,borderRadius:8,border:`1px solid ${C.border}`,background:'none',color:C.muted,fontSize:14,cursor:'pointer'}}>📦</button>
@@ -1316,7 +1336,7 @@ function AddMatchToSession({session, mode, errors, hits, duel, onSave}){
   );
 }
 
-function SessionDetailPage({session,config,custom={},onBack,onUpdateSession}){
+function SessionDetailPage({session,config,custom={},highlights={},onUpdateHighlights,onBack,onUpdateSession}){
   const mode=MODES.find(m=>m.id===session.modeId)||{name:session.modeName,color:C.blue,icon:"🎮"};
   const errors=getModeErrors(mode,custom),hits=getModeHits(mode,custom),duel=is1v1(session.modeId);
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(null);
@@ -1381,6 +1401,7 @@ function SessionDetailPage({session,config,custom={},onBack,onUpdateSession}){
         ))}
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:16}}>
+        {onUpdateHighlights&&<SessionHighlights sessionId={String(src.id)} highlights={highlights} onUpdate={onUpdateHighlights}/>}
         {src.sessionSummary&&!src.sessionSummary.startsWith('__')&&
           <CollapsibleSummary summary={src.sessionSummary} label="💬 Análisis IA — Resumen de sesión"/>}
         <HistorialSection count={src.matches.length} editing={editing}>
@@ -2402,6 +2423,449 @@ function TournamentPage({sessions,tournaments,config,onSaveTournament}){
 }
 
 
+function HighlightCard({hl, onDelete}){
+  const vid=ytId(hl.url);
+  const [expanded,setExpanded]=useState(false);
+  return(
+    <div style={{background:C.card,borderRadius:12,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:10}}>
+      {vid&&expanded&&(
+        <div style={{position:"relative",paddingBottom:"56.25%",height:0}}>
+          <iframe src={`https://www.youtube.com/embed/${vid}?autoplay=1`} title={hl.title||"Highlight"}
+            style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",border:"none"}} allowFullScreen/>
+        </div>
+      )}
+      {vid&&!expanded&&(
+        <div style={{position:"relative",cursor:"pointer"}} onClick={()=>setExpanded(true)}>
+          <img src={ytThumb(vid)} alt="thumbnail" style={{width:"100%",display:"block",maxHeight:160,objectFit:"cover"}}
+            onError={e=>{e.target.style.display="none";}}/>
+          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,.35)"}}>
+            <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(255,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>▶</div>
+          </div>
+        </div>
+      )}
+      {!vid&&(
+        <a href={hl.url} target="_blank" rel="noopener noreferrer"
+          style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",textDecoration:"none"}}>
+          <div style={{width:40,height:40,borderRadius:8,background:`${C.blue}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🎬</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:600,color:C.blue,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{hl.title||hl.url}</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{hl.url}</div>
+          </div>
+          <span style={{color:C.muted,fontSize:14,flexShrink:0}}>↗</span>
+        </a>
+      )}
+      <div style={{padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",borderTop:`1px solid ${C.border}`}}>
+        <div>
+          {hl.title&&!ytId(hl.url)&&<div style={{fontSize:13,fontWeight:600,color:C.text,marginBottom:2}}>{hl.title}</div>}
+          {hl.desc&&<div style={{fontSize:12,color:C.muted}}>{hl.desc}</div>}
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{hl.date}</div>
+        </div>
+        <button onClick={onDelete}
+          style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 8px",fontSize:11,color:C.muted,cursor:"pointer",flexShrink:0,marginLeft:8}}>
+          🗑
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AddHighlightForm({onAdd, onClose}){
+  const [url,setUrl]=useState("");
+  const [title,setTitle]=useState("");
+  const [desc,setDesc]=useState("");
+  const vid=ytId(url);
+  const valid=url.trim().length>5;
+  const today=new Date().toLocaleDateString("es-ES");
+  const add=()=>{
+    if(!valid)return;
+    onAdd({id:Date.now(),url:url.trim(),title:title.trim()||null,desc:desc.trim()||null,date:today});
+    onClose();
+  };
+  return(
+    <div style={{background:C.surface,borderRadius:12,padding:20,border:`1px solid ${C.border}`,marginBottom:12}}>
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:14}}>🎬 Añadir highlight</div>
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:11,color:C.muted,marginBottom:5}}>URL del clip o vídeo de YouTube *</div>
+        <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=... o Medal.tv/..."
+          style={{width:"100%",background:C.card,border:`1px solid ${url&&!valid?C.red:vid?C.green:C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+        {vid&&<div style={{fontSize:11,color:C.green,marginTop:4}}>✓ YouTube detectado — se mostrará el reproductor</div>}
+      </div>
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Título (opcional)</div>
+        <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ej: Aerial doble toque vs Diamond"
+          style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+      </div>
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Descripción (opcional)</div>
+        <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="¿Qué pasó en este clip?"
+          style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <button onClick={onClose} style={{padding:"10px",borderRadius:8,border:`1px solid ${C.border}`,background:"none",color:C.muted,fontSize:13,cursor:"pointer"}}>Cancelar</button>
+        <button onClick={add} disabled={!valid}
+          style={{padding:"10px",borderRadius:8,border:"none",background:valid?C.blue:C.border,color:valid?"#fff":C.muted,fontSize:13,fontWeight:700,cursor:valid?"pointer":"default"}}>
+          ✓ Guardar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SessionHighlights({sessionId, highlights, onUpdate}){
+  const [adding,setAdding]=useState(false);
+  const shl=highlights[sessionId]||[];
+  const addHl=(hl)=>{ const updated={...highlights,[sessionId]:[...shl,hl]}; onUpdate(updated); };
+  const delHl=(id)=>{ const updated={...highlights,[sessionId]:shl.filter(h=>h.id!==id)}; onUpdate(updated); };
+  return(
+    <div style={{marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:600,color:C.sub}}>🎬 Highlights ({shl.length})</div>
+        {!adding&&<button onClick={()=>setAdding(true)}
+          style={{padding:"5px 12px",borderRadius:7,border:`1px solid ${C.blue}`,background:`${C.blue}15`,color:C.blue,fontSize:12,cursor:"pointer",fontWeight:600}}>
+          + Añadir
+        </button>}
+      </div>
+      {adding&&<AddHighlightForm onAdd={addHl} onClose={()=>setAdding(false)}/>}
+      {shl.length===0&&!adding&&<div style={{fontSize:12,color:C.muted,textAlign:"center",padding:"14px 0"}}>Sin highlights en esta sesión</div>}
+      {shl.map(hl=><HighlightCard key={hl.id} hl={hl} onDelete={()=>delHl(hl.id)}/>)}
+    </div>
+  );
+}
+
+function HighlightsPage({highlights, sessions, onUpdate}){
+  const [adding,setAdding]=useState(false);
+  const [sessionLink,setSessionLink]=useState("none");
+  const [url,setUrl]=useState("");
+  const [title,setTitle]=useState("");
+  const [desc,setDesc]=useState("");
+
+  const allHls=Object.entries(highlights).flatMap(([sid,hls])=>
+    hls.map(h=>({...h,sessionId:sid,session:sid==="__global"?null:sessions.find(s=>String(s.id)===String(sid))}))
+  ).sort((a,b)=>b.id-a.id);
+
+  const vid=ytId(url);
+  const valid=url.trim().length>5;
+  const today=new Date().toLocaleDateString("es-ES");
+
+  const saveGlobal=()=>{
+    if(!valid)return;
+    const sid=sessionLink==="none"?"__global":sessionLink;
+    const hl={id:Date.now(),url:url.trim(),title:title.trim()||null,desc:desc.trim()||null,date:today};
+    const updated={...highlights,[sid]:[...(highlights[sid]||[]),hl]};
+    onUpdate(updated);
+    setAdding(false);setUrl("");setTitle("");setDesc("");setSessionLink("none");
+  };
+
+  return(
+    <div className="page-pad" style={{padding:32,maxWidth:720,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>🎬 Highlights</div>
+          <div style={{fontSize:13,color:C.muted}}>Todos tus clips y vídeos guardados · {allHls.length} total</div>
+        </div>
+        <button onClick={()=>setAdding(v=>!v)}
+          style={{padding:"9px 18px",borderRadius:9,border:`1px solid ${adding?C.red:C.blue}`,
+            background:adding?`${C.red}15`:`${C.blue}15`,color:adding?C.red:C.blue,
+            fontSize:13,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+          {adding?"✕ Cancelar":"+ Añadir highlight"}
+        </button>
+      </div>
+
+      {/* Global add form */}
+      {adding&&(
+        <div style={{background:C.surface,borderRadius:12,padding:20,border:`1px solid ${C.border}`,marginBottom:20}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:14}}>🎬 Nuevo highlight</div>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:5}}>URL del clip o vídeo *</div>
+            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=... o Medal.tv/..."
+              style={{width:"100%",background:C.card,border:`1px solid ${url&&!valid?C.red:vid?C.green:C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+            {vid&&<div style={{fontSize:11,color:C.green,marginTop:4}}>✓ YouTube detectado — reproductor embebido</div>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Título (opcional)</div>
+              <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ej: Aerial vs Diamond"
+                style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Vincular a sesión (opcional)</div>
+              <select value={sessionLink} onChange={e=>setSessionLink(e.target.value)}
+                style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}>
+                <option value="none">Sin sesión específica</option>
+                {sessions.slice(0,20).map(s=>(
+                  <option key={s.id} value={String(s.id)}>{s.modeName} · {s.date}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Descripción (opcional)</div>
+            <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="¿Qué pasó en este clip?"
+              style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+          </div>
+          <button onClick={saveGlobal} disabled={!valid}
+            style={{width:"100%",padding:"11px",borderRadius:9,border:"none",background:valid?C.blue:C.border,
+              color:valid?"#fff":C.muted,fontSize:14,fontWeight:700,cursor:valid?"pointer":"default"}}>
+            ✓ Guardar highlight
+          </button>
+        </div>
+      )}
+
+      {allHls.length===0&&!adding&&(
+        <div style={{textAlign:"center",padding:"60px 0",color:C.muted}}>
+          <div style={{fontSize:40,marginBottom:12}}>🎬</div>
+          <div style={{fontSize:15,fontWeight:600,color:C.sub,marginBottom:6}}>Sin highlights todavía</div>
+          <div style={{fontSize:13}}>Añade clips aquí directamente o desde el detalle de una sesión</div>
+        </div>
+      )}
+
+      <div style={{columns:"2 340px",columnGap:16}}>
+        {allHls.map(hl=>(
+          <div key={hl.id} style={{breakInside:"avoid",marginBottom:12}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:4,padding:"0 2px"}}>
+              {hl.session?`${hl.session.modeName} · ${hl.session.date}`:"Sin sesión vinculada"}
+            </div>
+            <HighlightCard hl={hl} onDelete={()=>{
+              const updated={...highlights,[hl.sessionId]:(highlights[hl.sessionId]||[]).filter(h=>h.id!==hl.id)};
+              onUpdate(updated);
+            }}/>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TrainingPage({trainingData, onUpdate}){
+  const [tab,setTab]=useState("packs");
+  const [catFilter,setCatFilter]=useState("all");
+  const [diffFilter,setDiffFilter]=useState("all");
+  const [showAdd,setShowAdd]=useState(false);
+  const [copied,setCopied]=useState(null);
+  const [editingNote,setEditingNote]=useState(null);
+
+  const data=trainingData||{customPacks:[],customMaps:[]};
+  const allPacks=[...DEFAULT_PACKS,...(data.customPacks||[])];
+  const allMaps=[...DEFAULT_MAPS,...(data.customMaps||[])];
+  const items=tab==="packs"?allPacks:allMaps;
+
+  const CATS=["all","Aerial","Shooting","Dribbling","Defense","Mechanics"];
+  const DIFFS=["all","Beginner","Intermediate","Advanced"];
+  const DIFF_COLORS={Beginner:C.green,Intermediate:C.amber,Advanced:C.red};
+
+  const filtered=items.filter(p=>(catFilter==="all"||p.category===catFilter)&&(diffFilter==="all"||p.difficulty===diffFilter));
+
+  const copyCode=(code,id)=>{
+    navigator.clipboard.writeText(code).then(()=>{setCopied(id);setTimeout(()=>setCopied(null),2000);}).catch(()=>{});
+  };
+
+  const saveNote=(id,note)=>{
+    const key=tab==="packs"?"packNotes":"mapNotes";
+    const updated={...data,[key]:{...data[key],[id]:note}};
+    onUpdate(updated);setEditingNote(null);
+  };
+
+  const addItem=(item)=>{
+    const key=tab==="packs"?"customPacks":"customMaps";
+    const updated={...data,[key]:[...(data[key]||[]),{...item,id:"u_"+Date.now(),isDefault:false}]};
+    onUpdate(updated);setShowAdd(false);
+  };
+
+  const deleteItem=(id)=>{
+    const key=tab==="packs"?"customPacks":"customMaps";
+    const updated={...data,[key]:(data[key]||[]).filter(p=>p.id!==id)};
+    onUpdate(updated);
+  };
+
+  return(
+    <div className="page-pad" style={{padding:32,maxWidth:820,margin:"0 auto"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>🎯 Biblioteca de Entrenamiento</div>
+        <div style={{fontSize:13,color:C.muted}}>Training packs y mapas Workshop para mejorar</div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:20,borderBottom:`1px solid ${C.border}`,paddingBottom:0}}>
+        {[["packs","📦 Training Packs",allPacks.length],["maps","🗺️ Workshop Maps",allMaps.length]].map(([t,lbl,count])=>(
+          <button key={t} onClick={()=>{setTab(t);setCatFilter("all");setDiffFilter("all");}}
+            style={{padding:"10px 16px",border:"none",background:"none",color:tab===t?C.blue:C.muted,
+              fontSize:13,fontWeight:tab===t?700:400,borderBottom:`2px solid ${tab===t?C.blue:"transparent"}`,
+              cursor:"pointer",marginBottom:-1}}>
+            {lbl} <span style={{fontSize:11,color:tab===t?C.blue:C.muted}}>({count})</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>
+          {CATS.map(c=>(
+            <button key={c} onClick={()=>setCatFilter(c)}
+              style={{padding:"5px 12px",borderRadius:20,border:`1px solid ${catFilter===c?C.blue:C.border}`,
+                background:catFilter===c?`${C.blue}15`:"none",color:catFilter===c?C.blue:C.muted,
+                fontSize:12,cursor:"pointer",fontWeight:catFilter===c?700:400}}>
+              {c==="all"?"Todas":c}
+            </button>
+          ))}
+        </div>
+        <select value={diffFilter} onChange={e=>setDiffFilter(e.target.value)}
+          style={{padding:"5px 10px",borderRadius:8,border:`1px solid ${C.border}`,background:C.card,color:C.sub,fontSize:12,outline:"none"}}>
+          {DIFFS.map(d=><option key={d} value={d}>{d==="all"?"Todas las dificultades":d}</option>)}
+        </select>
+        <button onClick={()=>setShowAdd(v=>!v)}
+          style={{padding:"7px 14px",borderRadius:8,border:`1px solid ${C.blue}`,background:`${C.blue}15`,color:C.blue,fontSize:12,fontWeight:600,cursor:"pointer",flexShrink:0}}>
+          + Añadir
+        </button>
+      </div>
+
+      {/* Add form */}
+      {showAdd&&<AddTrainingForm tab={tab} onAdd={addItem} onClose={()=>setShowAdd(false)}/>}
+
+      {/* Items grid */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
+        {filtered.map(item=>{
+          const notes=tab==="packs"?data.packNotes:data.mapNotes;
+          const note=notes?.[item.id]||"";
+          const isEditing=editingNote===item.id;
+          return(
+            <div key={item.id} style={{background:C.card,borderRadius:12,padding:16,border:`1px solid ${C.border}`,display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:3}}>{item.name}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:4}}>
+                    <span style={{fontSize:10,padding:"2px 7px",borderRadius:10,background:`${C.blue}15`,color:C.blue,border:`1px solid ${C.blue}30`}}>{item.category}</span>
+                    <span style={{fontSize:10,padding:"2px 7px",borderRadius:10,background:`${DIFF_COLORS[item.difficulty]||C.muted}15`,color:DIFF_COLORS[item.difficulty]||C.muted,border:`1px solid ${DIFF_COLORS[item.difficulty]||C.muted}30`}}>{item.difficulty}</span>
+                    {item.isDefault&&<span style={{fontSize:10,padding:"2px 7px",borderRadius:10,background:`${C.muted}15`,color:C.muted}}>⭐ Recomendado</span>}
+                  </div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>{item.desc}</div>
+                </div>
+                {!item.isDefault&&<button onClick={()=>deleteItem(item.id)}
+                  style={{background:"none",border:"none",color:C.muted,fontSize:14,cursor:"pointer",flexShrink:0,padding:4}}>🗑</button>}
+              </div>
+
+              {/* Code */}
+              <div style={{display:"flex",alignItems:"center",gap:8,background:C.surface,borderRadius:8,padding:"8px 12px"}}>
+                <div style={{flex:1,fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:C.text,letterSpacing:1}}>{item.code}</div>
+                <button onClick={()=>copyCode(item.code,item.id)}
+                  style={{padding:"5px 12px",borderRadius:6,border:`1px solid ${copied===item.id?C.green:C.border}`,
+                    background:copied===item.id?`${C.green}15`:"none",
+                    color:copied===item.id?C.green:C.sub,fontSize:11,cursor:"pointer",fontWeight:600,flexShrink:0,transition:"all .2s"}}>
+                  {copied===item.id?"✓ Copiado":"📋 Copiar"}
+                </button>
+              </div>
+
+              {/* Note */}
+              {isEditing
+                ?<NoteEditor note={note} onSave={n=>saveNote(item.id,n)} onClose={()=>setEditingNote(null)}/>
+                :<div style={{display:"flex",alignItems:"center",gap:6}}>
+                  {note&&<div style={{flex:1,fontSize:11,color:C.sub,fontStyle:"italic",lineHeight:1.5}}>📝 {note}</div>}
+                  <button onClick={()=>setEditingNote(item.id)}
+                    style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 9px",fontSize:11,color:C.muted,cursor:"pointer",flexShrink:0,marginLeft:"auto"}}>
+                    {note?"✏️ Nota":"+ Nota"}
+                  </button>
+                </div>}
+            </div>
+          );
+        })}
+        {filtered.length===0&&<div style={{gridColumn:"1/-1",textAlign:"center",padding:"40px 0",color:C.muted,fontSize:13}}>Sin resultados para este filtro</div>}
+      </div>
+    </div>
+  );
+}
+
+function NoteEditor({note,onSave,onClose}){
+  const [val,setVal]=useState(note);
+  return(
+    <div>
+      <textarea value={val} onChange={e=>setVal(e.target.value)} placeholder="Tu nota personal sobre este pack..."
+        rows={2} style={{width:"100%",background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:12,outline:"none",resize:"none"}}/>
+      <div style={{display:"flex",gap:8,marginTop:6}}>
+        <button onClick={onClose} style={{flex:1,padding:"6px",borderRadius:6,border:`1px solid ${C.border}`,background:"none",color:C.muted,fontSize:12,cursor:"pointer"}}>Cancelar</button>
+        <button onClick={()=>onSave(val)} style={{flex:1,padding:"6px",borderRadius:6,border:"none",background:C.blue,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Guardar</button>
+      </div>
+    </div>
+  );
+}
+
+function AddTrainingForm({tab,onAdd,onClose}){
+  const isPack=tab==="packs";
+  const [name,setName]=useState("");
+  const [code,setCode]=useState("");
+  const [cat,setCat]=useState("Aerial");
+  const [diff,setDiff]=useState("Intermediate");
+  const [desc,setDesc]=useState("");
+  const valid=name.trim()&&code.trim();
+  return(
+    <div style={{background:C.surface,borderRadius:12,padding:18,border:`1px solid ${C.border}`,marginBottom:16}}>
+      <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:14}}>+ {isPack?"Training Pack":"Workshop Map"}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Nombre *</div>
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre del pack"
+            style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,outline:"none"}}/>
+        </div>
+        <div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:5}}>{isPack?"Código *":"Nombre en Workshop *"}</div>
+          <input value={code} onChange={e=>setCode(e.target.value)} placeholder={isPack?"XXXX-XXXX-XXXX-XXXX":"Ej: Rings_PCC"}
+            style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Categoría</div>
+          <select value={cat} onChange={e=>setCat(e.target.value)}
+            style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,outline:"none"}}>
+            {["Aerial","Shooting","Dribbling","Defense","Mechanics"].map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Dificultad</div>
+          <select value={diff} onChange={e=>setDiff(e.target.value)}
+            style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,outline:"none"}}>
+            {["Beginner","Intermediate","Advanced"].map(d=><option key={d}>{d}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Descripción (opcional)</div>
+        <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="¿Para qué sirve este pack?"
+          style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:13,outline:"none"}}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <button onClick={onClose} style={{padding:"9px",borderRadius:8,border:`1px solid ${C.border}`,background:"none",color:C.muted,fontSize:13,cursor:"pointer"}}>Cancelar</button>
+        <button onClick={()=>valid&&onAdd({name:name.trim(),code:code.trim().toUpperCase(),category:cat,difficulty:diff,desc:desc.trim()})}
+          disabled={!valid}
+          style={{padding:"9px",borderRadius:8,border:"none",background:valid?C.blue:C.border,color:valid?"#fff":C.muted,fontSize:13,fontWeight:700,cursor:valid?"pointer":"default"}}>
+          ✓ Guardar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_PACKS = [
+  {id:"dp1", name:"Aerial Training Beginner", code:"A503-B26B-87B6-D10B", category:"Aerial", difficulty:"Beginner", desc:"Introduces basic aerials with slow, predictable shots.", isDefault:true},
+  {id:"dp2", name:"Aerial Training Intermediate", code:"F2BB-E48D-A06B-E73A", category:"Aerial", difficulty:"Intermediate", desc:"Higher and faster aerial shots for mid-level players.", isDefault:true},
+  {id:"dp3", name:"Wall Shots", code:"A3F2-C128-42A4-0F6B", category:"Shooting", difficulty:"Beginner", desc:"Practice hitting balls off the wall into the goal.", isDefault:true},
+  {id:"dp4", name:"Dribbling Fundamentals", code:"71E3-5A82-C1B4-D062", category:"Dribbling", difficulty:"Beginner", desc:"Ball control and dribbling exercises on the ground.", isDefault:true},
+  {id:"dp5", name:"Dribbling Advanced", code:"4CF5-9038-B26C-31D1", category:"Dribbling", difficulty:"Advanced", desc:"Advanced car-ball control, flicks and resets.", isDefault:true},
+  {id:"dp6", name:"Shooting Accuracy", code:"D7B2-3F9A-61C2-84E0", category:"Shooting", difficulty:"Beginner", desc:"Ground and low aerial shots at different angles.", isDefault:true},
+  {id:"dp7", name:"Power Shots", code:"B9C1-12A3-4D7E-0F6B", category:"Shooting", difficulty:"Intermediate", desc:"Hard ground shots practicing power and placement.", isDefault:true},
+  {id:"dp8", name:"Save Training", code:"25FB-C43B-6062-55C3", category:"Defense", difficulty:"Intermediate", desc:"Reaction saves from various positions on the wall.", isDefault:true},
+  {id:"dp9", name:"Backboard Reads", code:"5E2F-B1A3-7C8D-0E4F", category:"Defense", difficulty:"Advanced", desc:"Read and save shots bouncing off the backboard.", isDefault:true},
+  {id:"dp10",name:"Musty Flick", code:"2B2B-45D4-9AB5-3C6D", category:"Mechanics", difficulty:"Advanced", desc:"Practice the classic Musty flick off the wall.", isDefault:true},
+  {id:"dp11",name:"Air Dribble",  code:"7F3C-1A2B-0D6E-C4F9", category:"Mechanics", difficulty:"Advanced", desc:"Launch the ball off the wall and carry it in the air.", isDefault:true},
+  {id:"dp12",name:"Kickoff Training",code:"D628-E53F-19A4-B702", category:"Mechanics", difficulty:"Beginner", desc:"Different kickoff scenarios and timing.", isDefault:true},
+];
+
+const DEFAULT_MAPS = [
+  {id:"dm1", name:"Rings Map",       code:"Rings_PCC",    category:"Aerial",    difficulty:"Intermediate", desc:"Fly through rings to practice aerial car control.", isDefault:true},
+  {id:"dm2", name:"Dribble Challenge",code:"Dribble2",    category:"Dribbling", difficulty:"Intermediate", desc:"Classic dribbling obstacle course.", isDefault:true},
+  {id:"dm3", name:"Wall Run",        code:"WallRun_v3",   category:"Mechanics", difficulty:"Advanced",     desc:"Drive and jump along walls to build muscle memory.", isDefault:true},
+  {id:"dm4", name:"Aerial Obstacle Course",code:"AerialOC",category:"Aerial",  difficulty:"Advanced",     desc:"Navigate through aerial gates progressively harder.", isDefault:true},
+  {id:"dm5", name:"Pillars",         code:"Pillars_v2",   category:"Dribbling", difficulty:"Intermediate", desc:"Dribble around pillars without losing ball control.", isDefault:true},
+];
+
 const OKEY = 'rlt3f_onboarded';
 function isOnboarded(){ return !!localStorage.getItem(OKEY); }
 function setOnboarded(){ localStorage.setItem(OKEY,'1'); }
@@ -2512,6 +2976,8 @@ function App(){
   const [custom,      setCustom]      = useState(loadCustomItems);
   const [mechanics,   setMechanics]   = useState(loadMechanics);
   const [viewSess,    setViewSess]    = useState(null);
+  const [highlights,  setHighlights]  = useState(loadHighlights);
+  const [trainingData,setTrainingData]= useState(()=>loadTraining()||{customPacks:[],customMaps:[],packNotes:{},mapNotes:{}});
   const [mmrModal,    setMmrModal]    = useState(null);
   const [showCloud,   setShowCloud]   = useState(false);
   const [showImport,  setShowImport]  = useState(false);
@@ -2537,12 +3003,18 @@ function App(){
   // Run once on mount
   React.useEffect(() => { doInit(); }, []);
 
-  const doSync = async (s, m, t, cfg) => {
+  const doSync = async (s, m, t, cfg, cx, mx) => {
     if (!getCloudCfg()) { setSyncStatus('no_config'); return; }
     setSyncStatus('syncing');
-    const result = await pushToCloud(bundleData(s, m, t, cfg));
+    // Retry up to 2 times on failure
+    let result = { ok: false };
+    for(let i=0; i<3; i++){
+      result = await pushToCloud(bundleData(s, m, t, cfg, cx||custom, mx||mechanics));
+      if(result.ok) break;
+      if(i<2) await new Promise(r=>setTimeout(r, 1500*(i+1)));
+    }
     if (result.ok) { setSyncStatus('ok'); setLastSync(new Date()); }
-    else { setSyncStatus('error'); }
+    else { setSyncStatus('error'); console.warn('Sync failed:', result); }
   };
 
   const handleSave = (session) => {
@@ -2550,29 +3022,32 @@ function App(){
     let nh = mmrHist;
     if(session.endMMR){ nh={...mmrHist}; if(!nh[session.modeId])nh[session.modeId]=[]; nh[session.modeId]=[...nh[session.modeId],{date:session.date,mmr:session.endMMR}]; setMmrHist(nh); saveMMR(nh); }
     setPage("home");
-    doSync(ns, nh, tournaments, config);
+    doSync(ns, nh, tournaments, config, custom, mechanics);
   };
+  const handleUpdateHighlights=(updated)=>{ setHighlights(updated); saveHighlights(updated); };
+  const handleUpdateTraining=(updated)=>{ setTrainingData(updated); saveTraining(updated); };
+
   const handleUpdateSession = (updated) => {
     const ns=sessions.map(s=>s.id===updated.id?updated:s); setSessions(ns); saveSessions(ns); setViewSess(updated);
-    doSync(ns, mmrHist, tournaments, config);
+    doSync(ns, mmrHist, tournaments, config, custom, mechanics);
   };
   const handleSaveMMR = (mode, mmr) => {
     const nh={...mmrHist}; if(!nh[mode.id])nh[mode.id]=[];
     nh[mode.id]=[...nh[mode.id],{date:new Date().toLocaleDateString("es-ES"),mmr}];
     setMmrHist(nh); saveMMR(nh); setMmrModal(null);
-    doSync(sessions, nh, tournaments, config);
+    doSync(sessions, nh, tournaments, config, custom, mechanics);
   };
-  const handleSaveConfig = (cfg) => { setConfig(cfg); saveConfig(cfg); doSync(sessions, mmrHist, tournaments, cfg); };
+  const handleSaveConfig = (cfg) => { setConfig(cfg); saveConfig(cfg); doSync(sessions, mmrHist, tournaments, cfg, custom, mechanics); };
   const handleSaveCustom = (cx) => { setCustom(cx); saveCustomItems(cx); };
   const handleSaveMechanics = (mx) => { setMechanics(mx); saveMechanics(mx); };
-  const handleSaveTournament = (t) => { const nt=[t,...tournaments]; setTournaments(nt); saveTournaments(nt); doSync(sessions, mmrHist, nt, config); };
+  const handleSaveTournament = (t) => { const nt=[t,...tournaments]; setTournaments(nt); saveTournaments(nt); doSync(sessions, mmrHist, nt, config, custom, mechanics); };
 
   const handleImport = (bundle) => {
     if(bundle.sessions)    { setSessions(bundle.sessions);       saveSessions(bundle.sessions); }
     if(bundle.mmrHistory)  { setMmrHist(bundle.mmrHistory);      saveMMR(bundle.mmrHistory); }
     if(bundle.tournaments) { setTournaments(bundle.tournaments);  saveTournaments(bundle.tournaments); }
     if(bundle.config)      { setConfig(bundle.config);           saveConfig(bundle.config); }
-    doSync(bundle.sessions||sessions, bundle.mmrHistory||mmrHist, bundle.tournaments||tournaments, bundle.config||config);
+    doSync(bundle.sessions||sessions, bundle.mmrHistory||mmrHist, bundle.tournaments||tournaments, bundle.config||config, bundle.custom||custom, bundle.mechanics||mechanics);
   };
 
   const handlePullNow = async () => {
@@ -2590,7 +3065,7 @@ function App(){
 
   const modeId=page.startsWith("session_")?page.replace("session_",""):null;
   const syncColor = syncStatus==='ok'?C.green : syncStatus==='syncing'?C.amber : syncStatus==='error'?C.red : C.muted;
-  const syncLabel = syncStatus==='ok'?'✓ Sync' : syncStatus==='syncing'?'⟳ Sync…' : syncStatus==='error'?'✕ Sync' : cloudCfg ? '↕ Sync' : '☁ Config';
+  const syncLabel = syncStatus==='ok'?'✓ Sync' : syncStatus==='syncing'?'⟳ Sync…' : syncStatus==='error'?'✕ Error — reintentando' : cloudCfg ? '↕ Sync' : '☁ Config';
 
   if(!onboarded) return(
     <OnboardingWizard onComplete={({name,mmrHistory})=>{
@@ -2611,9 +3086,11 @@ function App(){
       {showCloud&&<CloudConfigModal onClose={()=>setShowCloud(false)} onSaved={()=>{setSyncStatus('idle');doInit();}}/>}
       {showImport&&<ImportExportModal onClose={()=>setShowImport(false)} onImport={handleImport}/>}
       {viewSess
-        ?<SessionDetailPage session={viewSess} config={config} custom={custom} onBack={()=>setViewSess(null)} onUpdateSession={handleUpdateSession}/>
+        ?<SessionDetailPage session={viewSess} config={config} custom={custom} highlights={highlights} onUpdateHighlights={handleUpdateHighlights} onBack={()=>setViewSess(null)} onUpdateSession={handleUpdateSession}/>
         :page==="home"        ?<HomePage sessions={sessions} mmrHistory={mmrHist} tournaments={tournaments} config={config} onNavigate={setPage} onEditMMR={m=>setMmrModal(m)}/>
         :page==="stats"       ?<StatsPage sessions={sessions} mmrHistory={mmrHist} config={config} custom={custom} onViewSession={s=>setViewSess(s)}/>
+        :page==="highlights"  ?<HighlightsPage highlights={highlights} sessions={sessions} onUpdate={handleUpdateHighlights}/>
+        :page==="training"   ?<TrainingPage trainingData={trainingData} onUpdate={handleUpdateTraining}/>
         :page==="tournaments" ?<TournamentPage sessions={sessions} tournaments={tournaments} config={config} onSaveTournament={handleSaveTournament}/>
         :page==="settings"    ?<SettingsPage config={config} onSaveConfig={handleSaveConfig} custom={custom} onSaveCustom={handleSaveCustom} mechanics={mechanics} onSaveMechanics={handleSaveMechanics} sessions={sessions} onUpdateSessions={(s)=>{setSessions(s);saveSessions(s);doSync(s,mmrHist,tournaments,config);}}/>
         :modeId               ?<SessionPage modeId={modeId} sessions={sessions} mmrHistory={mmrHist} config={config} custom={custom} mechanics={mechanics} onSaveMechanics={handleSaveMechanics} onSave={handleSave}/>
