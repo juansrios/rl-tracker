@@ -2549,26 +2549,98 @@ function SessionHighlights({sessionId, highlights, onUpdate}){
 }
 
 function HighlightsPage({highlights, sessions, onUpdate}){
+  const [adding,setAdding]=useState(false);
+  const [sessionLink,setSessionLink]=useState("none");
+  const [url,setUrl]=useState("");
+  const [title,setTitle]=useState("");
+  const [desc,setDesc]=useState("");
+
   const allHls=Object.entries(highlights).flatMap(([sid,hls])=>
-    hls.map(h=>({...h,sessionId:sid,session:sessions.find(s=>String(s.id)===String(sid))}))
+    hls.map(h=>({...h,sessionId:sid,session:sid==="__global"?null:sessions.find(s=>String(s.id)===String(sid))}))
   ).sort((a,b)=>b.id-a.id);
+
+  const vid=ytId(url);
+  const valid=url.trim().length>5;
+  const today=new Date().toLocaleDateString("es-ES");
+
+  const saveGlobal=()=>{
+    if(!valid)return;
+    const sid=sessionLink==="none"?"__global":sessionLink;
+    const hl={id:Date.now(),url:url.trim(),title:title.trim()||null,desc:desc.trim()||null,date:today};
+    const updated={...highlights,[sid]:[...(highlights[sid]||[]),hl]};
+    onUpdate(updated);
+    setAdding(false);setUrl("");setTitle("");setDesc("");setSessionLink("none");
+  };
+
   return(
     <div className="page-pad" style={{padding:32,maxWidth:720,margin:"0 auto"}}>
-      <div style={{marginBottom:24}}>
-        <div style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>🎬 Highlights</div>
-        <div style={{fontSize:13,color:C.muted}}>Todos tus clips y vídeos guardados</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:22,fontWeight:700,color:C.text,marginBottom:4}}>🎬 Highlights</div>
+          <div style={{fontSize:13,color:C.muted}}>Todos tus clips y vídeos guardados · {allHls.length} total</div>
+        </div>
+        <button onClick={()=>setAdding(v=>!v)}
+          style={{padding:"9px 18px",borderRadius:9,border:`1px solid ${adding?C.red:C.blue}`,
+            background:adding?`${C.red}15`:`${C.blue}15`,color:adding?C.red:C.blue,
+            fontSize:13,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+          {adding?"✕ Cancelar":"+ Añadir highlight"}
+        </button>
       </div>
-      {allHls.length===0&&(
+
+      {/* Global add form */}
+      {adding&&(
+        <div style={{background:C.surface,borderRadius:12,padding:20,border:`1px solid ${C.border}`,marginBottom:20}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:14}}>🎬 Nuevo highlight</div>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:5}}>URL del clip o vídeo *</div>
+            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=... o Medal.tv/..."
+              style={{width:"100%",background:C.card,border:`1px solid ${url&&!valid?C.red:vid?C.green:C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+            {vid&&<div style={{fontSize:11,color:C.green,marginTop:4}}>✓ YouTube detectado — reproductor embebido</div>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Título (opcional)</div>
+              <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ej: Aerial vs Diamond"
+                style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Vincular a sesión (opcional)</div>
+              <select value={sessionLink} onChange={e=>setSessionLink(e.target.value)}
+                style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}>
+                <option value="none">Sin sesión específica</option>
+                {sessions.slice(0,20).map(s=>(
+                  <option key={s.id} value={String(s.id)}>{s.modeName} · {s.date}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:5}}>Descripción (opcional)</div>
+            <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="¿Qué pasó en este clip?"
+              style={{width:"100%",background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 12px",color:C.text,fontSize:13,outline:"none"}}/>
+          </div>
+          <button onClick={saveGlobal} disabled={!valid}
+            style={{width:"100%",padding:"11px",borderRadius:9,border:"none",background:valid?C.blue:C.border,
+              color:valid?"#fff":C.muted,fontSize:14,fontWeight:700,cursor:valid?"pointer":"default"}}>
+            ✓ Guardar highlight
+          </button>
+        </div>
+      )}
+
+      {allHls.length===0&&!adding&&(
         <div style={{textAlign:"center",padding:"60px 0",color:C.muted}}>
           <div style={{fontSize:40,marginBottom:12}}>🎬</div>
           <div style={{fontSize:15,fontWeight:600,color:C.sub,marginBottom:6}}>Sin highlights todavía</div>
-          <div style={{fontSize:13}}>Añade clips desde el detalle de cada sesión en Estadísticas</div>
+          <div style={{fontSize:13}}>Añade clips aquí directamente o desde el detalle de una sesión</div>
         </div>
       )}
+
       <div style={{columns:"2 340px",columnGap:16}}>
         {allHls.map(hl=>(
           <div key={hl.id} style={{breakInside:"avoid",marginBottom:12}}>
-            {hl.session&&<div style={{fontSize:11,color:C.muted,marginBottom:4,padding:"0 2px"}}>{hl.session.modeName} · {hl.session.date}</div>}
+            <div style={{fontSize:11,color:C.muted,marginBottom:4,padding:"0 2px"}}>
+              {hl.session?`${hl.session.modeName} · ${hl.session.date}`:"Sin sesión vinculada"}
+            </div>
             <HighlightCard hl={hl} onDelete={()=>{
               const updated={...highlights,[hl.sessionId]:(highlights[hl.sessionId]||[]).filter(h=>h.id!==hl.id)};
               onUpdate(updated);
