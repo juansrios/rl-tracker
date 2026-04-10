@@ -1547,7 +1547,6 @@ function SessionPage({modeId,sessions,mmrHistory,config,custom={},mechanics={},o
     setCustomHitLabel("");setCustomHitCount(0);setMecLabel("");setMecIntentos(0);setMecLogradas(0);setNewMecInput("");
     // Auto-save draft after each match (clear inProgress since match is now saved)
     saveDraft(modeId,{step:"tracking",startMMR,focusErr,matches:[...matches,newMatch],inProgress:null});
-    setMatchSummary(null);
   };
   const saveSession=async()=>{
     setLoadingSessionSummary(true);
