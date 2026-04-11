@@ -2919,13 +2919,8 @@ function App(){
   const doSync = async (s, m, t, cfg, cx, mx) => {
     if (!getCloudCfg()) { setSyncStatus('no_config'); return; }
     setSyncStatus('syncing');
-    // Retry up to 2 times on failure
-    let result = { ok: false };
-    for(let i=0; i<3; i++){
-      result = await pushToCloud(bundleData(s, m, t, cfg, cx||custom, mx||mechanics));
-      if(result.ok) break;
-      if(i<2) await new Promise(r=>setTimeout(r, 1500*(i+1)));
-    }
+    // Single attempt — no retries to preserve API quota
+    let result = await pushToCloud(bundleData(s, m, t, cfg, cx||custom, mx||mechanics));
     if (result.ok) { setSyncStatus('ok'); setLastSync(new Date()); }
     else { setSyncStatus('error'); console.warn('Sync failed:', result); }
   };
