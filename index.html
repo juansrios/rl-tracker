@@ -813,7 +813,13 @@ function getCloudCfg() {
 function saveCloudCfg(cfg) { localStorage.setItem(JKEY, JSON.stringify(cfg)); }
 
 function bundleData(sessions, mmrHist, tournaments, config, custom, mechanics) {
-  return { sessions, mmrHistory: mmrHist, tournaments, config, custom: custom||{}, mechanics: mechanics||{}, lastSync: Date.now() };
+  // Strip AI summaries from matches to reduce bundle size (regeneratable)
+  const lightSessions = sessions.map(s=>({
+    ...s,
+    sessionSummary: null,
+    matches: s.matches.map(m=>({...m, summary:null}))
+  }));
+  return { sessions:lightSessions, mmrHistory: mmrHist, tournaments, config, custom: custom||{}, mechanics: mechanics||{}, lastSync: Date.now() };
 }
 function unbundleData(record) {
   return {
