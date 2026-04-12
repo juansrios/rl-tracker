@@ -30,7 +30,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useEffect,useRef}=React;
+const {useState,useEffect,useRef,useMemo}=React;
 
 // ── RANKS ─────────────────────────────────────────────────────────────────────
 const RANKS=[
@@ -43,115 +43,124 @@ const RANKS=[
   {id:"gc",      label:"GC+",      tier:7, color:"#FF6B6B"},
 ];
 
+// ── ERRORS BY RANK TIER ────────────────────────────────────────────────────────
+// Each error has minTier — below that tier, the error is hidden (not relevant)
+const ALL_ERRORS = [
+  {id:"whiff",      label:"Whiff en Aerial",          minTier:4}, // Plat+
+  {id:"overcommit", label:"Overcommit / Doble Commit", minTier:1},
+  {id:"rotacion",   label:"Mala Rotación",             minTier:2}, // Silver+
+  {id:"open_net",   label:"Open Net Fallado",          minTier:3}, // Gold+
+  {id:"kickoff",    label:"Kickoff Perdido",           minTier:1},
+  {id:"boost",      label:"Boost Mal Gestionado",      minTier:2}, // Silver+
+  {id:"posicion",   label:"Error de Posicionamiento",  minTier:1},
+  {id:"timing",     label:"Mal Timing en Remate",      minTier:3}, // Gold+
+  {id:"cincuenta",  label:"Perdiste el 50/50",         minTier:1},
+];
+
+function getErrorsForTier(tier){
+  return ALL_ERRORS.filter(e=>e.minTier<=tier);
+}
+
 // ── AREAS ─────────────────────────────────────────────────────────────────────
 const AREAS=[
-  {id:"upper",   label:"Tren Superior", icon:"💪"},
-  {id:"core",    label:"Tren Medio",    icon:"🔥"},
-  {id:"lower",   label:"Tren Inferior", icon:"🦵"},
-  {id:"full",    label:"Cuerpo Completo",icon:"⚡"},
+  {id:"upper",label:"Tren Superior",icon:"💪"},
+  {id:"core", label:"Tren Medio",   icon:"🔥"},
+  {id:"lower",label:"Tren Inferior",icon:"🦵"},
+  {id:"full", label:"Cuerpo Completo",icon:"⚡"},
 ];
 
 // ── EXERCISE POOL ─────────────────────────────────────────────────────────────
-// Each exercise: areas[], genders (m/f/both), minTier, maxTier, name, unit, reps, rest
 const POOL=[
   // UPPER
-  {id:"pushup",    areas:["upper","full"],  gender:"m", min:1, name:"Push-ups",          icon:"💪", muscle:"Pecho + Tríceps",      unit:"reps",baseReps:12,rest:45, desc:"Manos a anchura de hombros, pecho al suelo, sube fuerte"},
-  {id:"pushup_k",  areas:["upper","full"],  gender:"f", min:1, name:"Push-ups rodilla",  icon:"💪", muscle:"Pecho + Tríceps",      unit:"reps",baseReps:15,rest:45, desc:"Rodillas en el suelo, misma posición de brazo"},
-  {id:"tricep",    areas:["upper","full"],  gender:"b", min:1, name:"Dips en silla",      icon:"🪑", muscle:"Tríceps",              unit:"reps",baseReps:12,rest:40, desc:"Manos en silla, baja doblando codos, sube"},
-  {id:"plank",     areas:["upper","core"],  gender:"b", min:1, name:"Plancha",            icon:"🧱", muscle:"Core + Estabilidad",   unit:"seg", baseReps:30,rest:40, desc:"Codos al suelo, cuerpo recto, aguanta"},
-  {id:"shoulder",  areas:["upper"],         gender:"b", min:3, name:"Pike Push-ups",      icon:"🔺", muscle:"Hombros",              unit:"reps",baseReps:10,rest:50, desc:"Cadera arriba en V invertida, baja la cabeza al suelo"},
+  {id:"pushup",   areas:["upper","full"], gender:"m",min:1,max:7,name:"Push-ups",           icon:"💪",muscle:"Pecho + Tríceps",    unit:"reps",baseReps:12,rest:45,desc:"Manos a anchura de hombros, pecho al suelo, sube fuerte"},
+  {id:"pushup_k", areas:["upper","full"], gender:"f",min:1,max:7,name:"Push-ups rodilla",   icon:"💪",muscle:"Pecho + Tríceps",    unit:"reps",baseReps:15,rest:45,desc:"Rodillas en el suelo, misma posición de brazo"},
+  {id:"pushup_w", areas:["upper","full"], gender:"b",min:1,max:2,name:"Push-ups en pared",  icon:"💪",muscle:"Pecho básico",       unit:"reps",baseReps:15,rest:35,desc:"De pie frente a la pared, flexiona los brazos"},
+  {id:"tricep",   areas:["upper","full"], gender:"b",min:1,max:7,name:"Dips en silla",      icon:"🪑",muscle:"Tríceps",            unit:"reps",baseReps:12,rest:40,desc:"Manos en silla, baja doblando codos, sube"},
+  {id:"plank",    areas:["upper","core"], gender:"b",min:3,max:7,name:"Plancha",             icon:"🧱",muscle:"Core + Estabilidad", unit:"seg", baseReps:30,rest:40,desc:"Codos al suelo, cuerpo recto, aguanta"},
+  {id:"plank_k",  areas:["upper","core"], gender:"b",min:1,max:2,name:"Plancha rodillas",   icon:"🧱",muscle:"Core básico",        unit:"seg", baseReps:20,rest:35,desc:"Como plancha pero con rodillas apoyadas"},
+  {id:"shoulder", areas:["upper"],        gender:"b",min:5,max:7,name:"Pike Push-ups",       icon:"🔺",muscle:"Hombros",            unit:"reps",baseReps:10,rest:50,desc:"Cadera arriba en V invertida, baja la cabeza al suelo"},
   // CORE
-  {id:"crunch",    areas:["core"],          gender:"b", min:1, name:"Crunches",           icon:"🔄", muscle:"Abdomen",              unit:"reps",baseReps:20,rest:35, desc:"Espalda en el suelo, eleva hombros hacia rodillas"},
-  {id:"twist",     areas:["core","full"],   gender:"b", min:1, name:"Russian Twists",     icon:"🌀", muscle:"Core + Rotación",      unit:"reps",baseReps:20,rest:40, desc:"Sentado, pies levantados, gira tocando suelo a cada lado"},
-  {id:"mclimb",    areas:["core","full"],   gender:"b", min:2, name:"Mountain Climbers",  icon:"🧗", muscle:"Core + Cardio",        unit:"reps",baseReps:20,rest:40, desc:"Desde plancha, lleva rodillas al pecho alternando rápido"},
-  {id:"legrise",   areas:["core"],          gender:"b", min:1, name:"Elevaciones pierna", icon:"🦵", muscle:"Abdomen Bajo",         unit:"reps",baseReps:15,rest:40, desc:"Espalda plana, sube las piernas rectas a 90°"},
-  {id:"superman",  areas:["core"],          gender:"b", min:1, name:"Superman",           icon:"🦸", muscle:"Espalda Baja",         unit:"seg", baseReps:25,rest:35, desc:"Boca abajo, eleva brazos y piernas simultáneamente"},
+  {id:"crunch",   areas:["core"],         gender:"b",min:1,max:7,name:"Crunches",            icon:"🔄",muscle:"Abdomen",            unit:"reps",baseReps:20,rest:35,desc:"Espalda en el suelo, eleva hombros hacia rodillas"},
+  {id:"twist",    areas:["core","full"],  gender:"b",min:3,max:7,name:"Russian Twists",      icon:"🌀",muscle:"Core + Rotación",    unit:"reps",baseReps:20,rest:40,desc:"Sentado, pies levantados, gira tocando suelo a cada lado"},
+  {id:"twist_e",  areas:["core","full"],  gender:"b",min:1,max:2,name:"Twist sentado",       icon:"🌀",muscle:"Core básico",        unit:"reps",baseReps:20,rest:35,desc:"Sentado con pies en el suelo, gira el torso a cada lado"},
+  {id:"mclimb",   areas:["core","full"],  gender:"b",min:4,max:7,name:"Mountain Climbers",   icon:"🧗",muscle:"Core + Cardio",      unit:"reps",baseReps:20,rest:40,desc:"Desde plancha, lleva rodillas al pecho alternando rápido"},
+  {id:"legrise",  areas:["core"],         gender:"b",min:1,max:7,name:"Elevaciones pierna",  icon:"🦵",muscle:"Abdomen Bajo",       unit:"reps",baseReps:15,rest:40,desc:"Espalda plana, sube las piernas rectas a 90°"},
+  {id:"superman", areas:["core"],         gender:"b",min:1,max:7,name:"Superman",            icon:"🦸",muscle:"Espalda Baja",       unit:"seg", baseReps:25,rest:35,desc:"Boca abajo, eleva brazos y piernas simultáneamente"},
   // LOWER
-  {id:"squat",     areas:["lower","full"],  gender:"b", min:1, name:"Sentadillas",        icon:"🏋️", muscle:"Piernas + Glúteos",   unit:"reps",baseReps:15,rest:45, desc:"Pies separados, baja hasta paralelo, rodillas no pasan pies"},
-  {id:"sqjump",    areas:["lower","full"],  gender:"b", min:3, name:"Squat Jumps",        icon:"⚡", muscle:"Piernas + Explosividad",unit:"reps",baseReps:12,rest:60, desc:"Sentadilla profunda, salta al subir, aterriza suave"},
-  {id:"lunge",     areas:["lower"],         gender:"b", min:1, name:"Zancadas",           icon:"🦵", muscle:"Piernas + Equilibrio", unit:"reps",baseReps:16,rest:45, desc:"Paso amplio adelante, rodilla trasera casi toca el suelo"},
-  {id:"calf",      areas:["lower"],         gender:"b", min:1, name:"Elevaciones talón",  icon:"👟", muscle:"Gemelos",              unit:"reps",baseReps:25,rest:30, desc:"Párate en puntillas lentamente, baja controlado"},
-  {id:"glute",     areas:["lower","core"],  gender:"b", min:1, name:"Puente de glúteos",  icon:"🌉", muscle:"Glúteos + Core",       unit:"reps",baseReps:20,rest:35, desc:"Espalda en suelo, pies apoyados, eleva cadera"},
+  {id:"squat",    areas:["lower","full"], gender:"b",min:1,max:7,name:"Sentadillas",         icon:"🏋️",muscle:"Piernas + Glúteos", unit:"reps",baseReps:15,rest:45,desc:"Pies separados, baja hasta paralelo"},
+  {id:"sqjump",   areas:["lower","full"], gender:"b",min:5,max:7,name:"Squat Jumps",         icon:"⚡",muscle:"Piernas + Explosión",unit:"reps",baseReps:12,rest:60,desc:"Sentadilla profunda, salta al subir, aterriza suave"},
+  {id:"sqfast",   areas:["lower","full"], gender:"b",min:3,max:4,name:"Sentadillas rápidas", icon:"⚡",muscle:"Piernas + Ritmo",    unit:"reps",baseReps:15,rest:45,desc:"Sentadillas a ritmo constante, sube rápido sin saltar"},
+  {id:"lunge",    areas:["lower"],        gender:"b",min:2,max:7,name:"Zancadas",            icon:"🦵",muscle:"Piernas + Equilibrio",unit:"reps",baseReps:16,rest:45,desc:"Paso amplio adelante, rodilla trasera casi toca el suelo"},
+  {id:"calf",     areas:["lower"],        gender:"b",min:1,max:7,name:"Elevaciones talón",   icon:"👟",muscle:"Gemelos",            unit:"reps",baseReps:25,rest:30,desc:"Párate en puntillas lentamente, baja controlado"},
+  {id:"glute",    areas:["lower","core"], gender:"b",min:1,max:7,name:"Puente de glúteos",   icon:"🌉",muscle:"Glúteos + Core",     unit:"reps",baseReps:20,rest:35,desc:"Espalda en suelo, pies apoyados, eleva cadera"},
   // FULL
-  {id:"burpee",    areas:["full"],          gender:"b", min:4, name:"Burpees",            icon:"💥", muscle:"Full Body",            unit:"reps",baseReps:8, rest:75, desc:"Plancha–push-up–salto. El rey del castigo"},
-  {id:"burpee_e",  areas:["full"],          gender:"b", min:1, name:"Burpees sin salto",  icon:"💥", muscle:"Full Body",            unit:"reps",baseReps:10,rest:60, desc:"Igual que burpee normal pero sin el salto final"},
-  {id:"jjack",     areas:["full"],          gender:"b", min:1, name:"Jumping Jacks",      icon:"🦘", muscle:"Cardio + Full Body",   unit:"reps",baseReps:30,rest:30, desc:"Saltos abriendo brazos y piernas. Rítmico y constante"},
-  {id:"bear",      areas:["full"],          gender:"b", min:2, name:"Bear Crawls",        icon:"🐻", muscle:"Full Body + Core",     unit:"reps",baseReps:10,rest:50, desc:"A cuatro patas con rodillas a 5cm del suelo, avanza"},
+  {id:"burpee",   areas:["full"],         gender:"b",min:6,max:7,name:"Burpees",             icon:"💥",muscle:"Full Body",          unit:"reps",baseReps:8, rest:75,desc:"Plancha–push-up–salto. El rey del castigo"},
+  {id:"burpee_e", areas:["full"],         gender:"b",min:4,max:5,name:"Burpees sin salto",   icon:"💥",muscle:"Full Body mod.",     unit:"reps",baseReps:10,rest:60,desc:"Igual que burpee normal pero sin el salto final"},
+  {id:"burpee_b", areas:["full"],         gender:"b",min:1,max:3,name:"Sentadilla + plancha",icon:"💥",muscle:"Full Body básico",   unit:"reps",baseReps:10,rest:50,desc:"Sentadilla, luego baja a plancha, levántate. Sin salto ni push-up"},
+  {id:"jjack",    areas:["full"],         gender:"b",min:1,max:7,name:"Jumping Jacks",       icon:"🦘",muscle:"Cardio + Full Body", unit:"reps",baseReps:30,rest:30,desc:"Saltos abriendo brazos y piernas. Rítmico y constante"},
+  {id:"bear",     areas:["full"],         gender:"b",min:4,max:7,name:"Bear Crawls",         icon:"🐻",muscle:"Full Body + Core",   unit:"reps",baseReps:10,rest:50,desc:"A cuatro patas con rodillas a 5cm del suelo, avanza"},
 ];
 
 // ── ERROR → EXERCISE MAPPING ──────────────────────────────────────────────────
-// For each error ID, which pool exercise IDs are appropriate
 const ERROR_MAP={
-  whiff:      {upper:["pushup","pushup_k","shoulder"],   core:["mclimb","plank"],      lower:["sqjump","squat"], full:["mclimb","burpee","burpee_e"]},
-  overcommit: {upper:["pushup","pushup_k","tricep"],     core:["twist","crunch"],      lower:["sqjump","lunge"], full:["sqjump","burpee","burpee_e"]},
-  rotacion:   {upper:["tricep","plank"],                 core:["twist","legrise"],     lower:["glute","lunge"],  full:["twist","bear","jjack"]},
-  open_net:   {upper:["pushup","shoulder"],              core:["mclimb","superman"],   lower:["sqjump","calf"],  full:["burpee","burpee_e","jjack"]},
-  kickoff:    {upper:["plank","pushup_k"],               core:["crunch","superman"],   lower:["squat","calf"],   full:["jjack","bear","burpee_e"]},
-  boost:      {upper:["plank","shoulder"],               core:["plank","superman"],    lower:["glute","squat"],  full:["plank","bear","jjack"]},
-  posicion:   {upper:["pushup","pushup_k"],              core:["legrise","crunch"],    lower:["lunge","glute"],  full:["squat","jjack","burpee_e"]},
-  timing:     {upper:["tricep","shoulder"],              core:["twist","mclimb"],      lower:["sqjump","calf"],  full:["mclimb","burpee_e","jjack"]},
-  cincuenta:  {upper:["pushup","pushup_k"],              core:["crunch","plank"],      lower:["squat","lunge"],  full:["burpee_e","bear","jjack"]},
+  whiff:      {upper:["shoulder","pushup","pushup_k"],core:["mclimb","plank","plank_k"],  lower:["sqjump","sqfast","squat"], full:["mclimb","burpee","burpee_e","burpee_b"]},
+  overcommit: {upper:["pushup","pushup_k","pushup_w","tricep"],core:["twist","twist_e","crunch"],lower:["sqjump","sqfast","squat"],full:["sqjump","sqfast","burpee","burpee_e","burpee_b"]},
+  rotacion:   {upper:["tricep","plank","plank_k"],   core:["twist","twist_e","legrise"],   lower:["glute","lunge","squat"],   full:["twist","twist_e","bear","jjack"]},
+  open_net:   {upper:["pushup","pushup_k","shoulder"],core:["mclimb","superman","crunch"], lower:["sqjump","sqfast","calf"],   full:["burpee","burpee_e","burpee_b","jjack"]},
+  kickoff:    {upper:["plank","plank_k","pushup_w"], core:["crunch","superman","legrise"], lower:["squat","calf","glute"],    full:["jjack","bear","burpee_b"]},
+  boost:      {upper:["plank","plank_k","tricep"],   core:["plank","plank_k","superman"], lower:["glute","squat","calf"],    full:["plank","plank_k","jjack"]},
+  posicion:   {upper:["pushup","pushup_k","pushup_w"],core:["legrise","crunch","superman"],lower:["lunge","glute","squat"],  full:["squat","jjack","burpee_b"]},
+  timing:     {upper:["tricep","shoulder","pushup"],  core:["twist","twist_e","mclimb"],   lower:["sqjump","sqfast","calf"],  full:["mclimb","burpee_e","burpee_b","jjack"]},
+  cincuenta:  {upper:["pushup","pushup_k","pushup_w"],core:["crunch","plank","plank_k"],   lower:["squat","lunge","glute"],  full:["burpee_b","jjack","bear"]},
 };
 
-const ERR_LABELS={
-  whiff:"Whiff en Aerial",overcommit:"Overcommit / Doble Commit",rotacion:"Mala Rotación",
-  open_net:"Open Net Fallado",kickoff:"Kickoff Perdido",boost:"Boost Mal Gestionado",
-  posicion:"Error de Posicionamiento",timing:"Mal Timing",cincuenta:"Perdiste el 50/50"
-};
+const ERR_LABELS=Object.fromEntries(ALL_ERRORS.map(e=>[e.id,e.label]));
 
-function pickExercise(errId, area, gender, tier){
+function pickExercise(errId,area,gender,tier){
   const candidates=(ERROR_MAP[errId]||{})[area]||[];
-  // Filter by pool availability, gender compatibility, tier range
   const filtered=candidates
     .map(id=>POOL.find(e=>e.id===id))
-    .filter(e=>e && (e.gender==="b"||e.gender===gender) && e.min<=tier);
-  if(filtered.length>0) return filtered[0];
-  // Fallback: any pool exercise for this area and gender/tier
-  const fallback=POOL.filter(e=>e.areas.includes(area)&&(e.gender==="b"||e.gender===gender)&&e.min<=tier);
-  return fallback[0]||POOL[0];
+    .filter(e=>e&&(e.gender==="b"||e.gender===gender)&&e.min<=tier&&(!e.max||e.max>=tier));
+  if(filtered.length>0)return filtered[0];
+  const fallback=POOL.filter(e=>e.areas.includes(area)&&(e.gender==="b"||e.gender===gender)&&e.min<=tier&&(!e.max||e.max>=tier));
+  return fallback[0]||POOL.find(e=>e.areas.includes(area))||POOL[0];
 }
 
-function buildPlan(errors, hits, area, gender, tier){
+function buildPlan(errors,hits,area,gender,tier){
   const HIT_REDUCTION=3;
   const reduction=Math.floor(hits/HIT_REDUCTION);
   const plan=[];
-
   Object.entries(errors).forEach(([errId,count])=>{
     if(count<=0)return;
-    const ex=pickExercise(errId, area, gender, tier);
+    const ex=pickExercise(errId,area,gender,tier);
     if(!ex)return;
-    // Check if this exercise is already in plan (same errId can map to same exercise)
     const existing=plan.find(p=>p.exId===ex.id);
-    const sets=Math.max(1, Math.min(5, 1+(count-1)));
-    if(existing){ existing.sets=Math.min(5,existing.sets+sets); existing.errIds.push(errId); }
-    else plan.push({exId:ex.id,...ex,sets,errIds:[errId],errLabels:[ERR_LABELS[errId]]});
+    const sets=Math.min(5,2+(count-1)); // min 2
+    if(existing){existing.sets=Math.min(5,existing.sets+1);existing.errLabels.push(ERR_LABELS[errId]);}
+    else plan.push({exId:ex.id,...ex,sets,errLabels:[ERR_LABELS[errId]]});
   });
-
-  // Ensure min 1 set per exercise (already guaranteed above)
-  // Apply hit reduction
-  let toReduce=Math.min(reduction, plan.reduce((a,e)=>a+e.sets,0)-plan.length);
+  // Reduce by hits but never below 2
+  let toReduce=Math.min(reduction,plan.reduce((a,e)=>a+Math.max(0,e.sets-2),0));
   for(const ex of [...plan].sort((a,b)=>b.sets-a.sets)){
     if(toReduce<=0)break;
     const orig=plan.find(p=>p.exId===ex.exId);
-    const reduce=Math.min(orig.sets-1,toReduce);
+    const reduce=Math.min(orig.sets-2,toReduce);
     orig.sets-=reduce;toReduce-=reduce;
   }
-  return plan.filter(p=>p.sets>0);
+  return plan.filter(p=>p.sets>=2);
 }
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
-const WKEY='rlw_history2';
+const WKEY='rlw_history3';
 function loadHistory(){try{const s=localStorage.getItem(WKEY);return s?JSON.parse(s):[];}catch{return[];}}
 function saveHistory(h){localStorage.setItem(WKEY,JSON.stringify(h));}
-
 function getAllSessions(){
   for(const key of['rlt3_s','rlt3f_s']){
     try{const raw=localStorage.getItem(key);if(raw){const d=JSON.parse(raw);if(d&&d.length>0)return d;}}catch{}
   }return[];
 }
-
-function extractFromSession(session){
-  const errors=Object.fromEntries(Object.keys(ERR_LABELS).map(k=>[k,0]));
+function extractFromSession(session,tier){
+  const errors=Object.fromEntries(getErrorsForTier(tier).map(e=>[e.id,0]));
   let hits=0;
   session.matches?.forEach(m=>{
     Object.entries(m.errors||{}).forEach(([k,v])=>{if(k in errors)errors[k]=(errors[k]||0)+v;});
@@ -160,167 +169,215 @@ function extractFromSession(session){
   return{errors,hits};
 }
 
-// ── SHARED COMPONENTS ─────────────────────────────────────────────────────────
-const Btn=({onClick,children,color="var(--border)",textColor="var(--sub)",active=false,disabled=false,style:ex={}})=>(
-  <button onClick={onClick} disabled={disabled}
-    style={{padding:"10px 16px",borderRadius:10,border:`2px solid ${active?color:"var(--border)"}`,
-      background:active?`${color}18`:"var(--card)",color:active?color:textColor,
-      fontSize:13,fontWeight:active?700:500,opacity:disabled?.4:1,...ex}}>
-    {children}
-  </button>
-);
-
-const Counter=({value,onChange,color="var(--red)"})=>(
-  <div style={{display:"flex",alignItems:"center",gap:6}}>
-    <button onClick={()=>onChange(Math.max(0,value-1))}
-      style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--sub)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-    <span className="D" style={{fontSize:22,fontWeight:700,color:value>0?color:"var(--muted)",minWidth:20,textAlign:"center"}}>{value}</span>
-    <button onClick={()=>onChange(value+1)}
-      style={{width:28,height:28,borderRadius:6,border:`1px solid ${color}40`,background:`${color}10`,color,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
-  </div>
-);
-
+// ── TIMER ─────────────────────────────────────────────────────────────────────
 function Timer({seconds,total,onDone,label,color="var(--green)"}){
   const [left,setLeft]=useState(seconds);
   useEffect(()=>{
     const iv=setInterval(()=>setLeft(l=>{if(l<=1){clearInterval(iv);onDone();return 0;}return l-1;}),1000);
     return()=>clearInterval(iv);
   },[]);
-  const r=70,circ=2*Math.PI*r,offset=circ-(left/total)*circ;
+  const r=60,circ=2*Math.PI*r,offset=circ-(left/total)*circ;
   return(
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
-      <div style={{fontSize:12,fontWeight:600,color:"var(--sub)",textTransform:"uppercase",letterSpacing:2}}>{label}</div>
-      <div style={{width:156,height:156,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-        <svg width="156" height="156" viewBox="0 0 156 156" style={{position:"absolute",top:0,left:0,transform:"rotate(-90deg)"}}>
-          <circle cx="78" cy="78" r={r} fill="none" stroke="var(--border)" strokeWidth="6"/>
-          <circle cx="78" cy="78" r={r} fill="none" stroke={color} strokeWidth="6"
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
+      {label&&<div style={{fontSize:11,fontWeight:600,color:"var(--sub)",textTransform:"uppercase",letterSpacing:2}}>{label}</div>}
+      <div style={{width:136,height:136,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+        <svg width="136" height="136" viewBox="0 0 136 136" style={{position:"absolute",top:0,left:0,transform:"rotate(-90deg)"}}>
+          <circle cx="68" cy="68" r={r} fill="none" stroke="var(--border)" strokeWidth="5"/>
+          <circle cx="68" cy="68" r={r} fill="none" stroke={color} strokeWidth="5"
             strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
             style={{transition:"stroke-dashoffset .9s linear"}}/>
         </svg>
         <div style={{position:"relative",zIndex:1,textAlign:"center"}}>
-          <div className="D" style={{fontSize:52,fontWeight:900,lineHeight:1,color}}>{left}</div>
-          <div style={{fontSize:11,color:"var(--muted)"}}>seg</div>
+          <div className="D" style={{fontSize:46,fontWeight:900,lineHeight:1,color}}>{left}</div>
+          <div style={{fontSize:10,color:"var(--muted)"}}>seg</div>
         </div>
       </div>
-      <button onClick={onDone} style={{padding:"7px 22px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--muted)",fontSize:12}}>Saltar →</button>
+      <button onClick={onDone} style={{padding:"5px 18px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--muted)",fontSize:11}}>Saltar →</button>
     </div>
   );
 }
 
 function SetDots({done,total,color}){
   return(
-    <div style={{display:"flex",gap:7,justifyContent:"center"}}>
+    <div style={{display:"flex",gap:6,justifyContent:"center",flexWrap:"wrap"}}>
       {Array.from({length:total}).map((_,i)=>(
-        <div key={i} style={{width:11,height:11,borderRadius:3,background:i<done?color:"var(--border)",border:`1px solid ${i<done?color:"var(--border)"}`,transition:"background .15s"}}/>
+        <div key={i} style={{width:10,height:10,borderRadius:3,background:i<done?color:"var(--border)",border:`1px solid ${i<done?color:"var(--border)"}`,transition:"background .15s"}}/>
       ))}
     </div>
   );
 }
 
-// ── EXECUTION ─────────────────────────────────────────────────────────────────
-function ExecutionScreen({players,onFinish}){
-  // players = [{name, plan, color}]
-  const [pIdx,setPIdx]=useState(0); // which player's turn (for co-op)
-  const [exIdx,setExIdx]=useState(0);
-  const [setNum,setSetNum]=useState(1);
-  const [phase,setPhase]=useState("show"); // show | work | rest | done
-  const [doneSets,setDoneSets]=useState(0);
-  const isCoop=players.length>1;
+// ── EXERCISE CARD (used in coop columns) ──────────────────────────────────────
+function ExCard({ex,setNum,player,onComplete,onTimerDone,compact=false}){
+  const done=setNum-1;
+  return(
+    <div style={{background:"var(--card)",borderRadius:12,padding:compact?14:18,
+      border:`2px solid ${player.color}40`,display:"flex",flexDirection:"column",gap:10,flex:1}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={{width:8,height:8,borderRadius:"50%",background:player.color,flexShrink:0}}/>
+        <div className="D" style={{fontSize:13,fontWeight:700,color:player.color}}>{player.name}</div>
+      </div>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:28}}>{ex.icon}</div>
+        <div className="D" style={{fontSize:compact?20:24,fontWeight:900,color:"var(--text)",lineHeight:1,marginTop:4}}>{ex.name}</div>
+        <div style={{fontSize:11,color:"var(--sub)",marginTop:2}}>{ex.muscle}</div>
+      </div>
+      <div style={{textAlign:"center"}}>
+        <div className="D" style={{fontSize:compact?36:44,fontWeight:900,color:player.color,lineHeight:1}}>{ex.baseReps}</div>
+        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase"}}>{ex.unit}</div>
+      </div>
+      <div style={{fontSize:11,color:"var(--muted)",textAlign:"center",lineHeight:1.5}}>{ex.desc}</div>
+      <SetDots done={done} total={ex.sets} color={player.color}/>
+      <div style={{fontSize:11,color:"var(--muted)",textAlign:"center"}}>Serie {setNum}/{ex.sets}</div>
+      {ex.unit==="seg"
+        ?<Timer seconds={ex.baseReps} total={ex.baseReps} onDone={onTimerDone} color={player.color}/>
+        :<button onClick={onComplete}
+          style={{width:"100%",padding:"12px",borderRadius:10,border:"none",
+            background:player.color,color:"#fff",fontSize:14,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif"}}>
+          ✓ SERIE COMPLETA
+        </button>}
+    </div>
+  );
+}
 
-  const player=players[pIdx];
-  const plan=player.plan;
-  const ex=plan[exIdx];
+// ── EXECUTION SCREEN ──────────────────────────────────────────────────────────
+function RestTimer({seconds,color}){
+  const [left,setLeft]=useState(seconds);
+  useEffect(()=>{
+    const iv=setInterval(()=>setLeft(l=>Math.max(0,l-1)),1000);
+    return()=>clearInterval(iv);
+  },[]);
+  const r=50,circ=2*Math.PI*r,offset=circ-(left/seconds)*circ;
+  return(
+    <div style={{width:120,height:120,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+      <svg width="120" height="120" viewBox="0 0 120 120" style={{position:"absolute",top:0,left:0,transform:"rotate(-90deg)"}}>
+        <circle cx="60" cy="60" r={r} fill="none" stroke="var(--border)" strokeWidth="5"/>
+        <circle cx="60" cy="60" r={r} fill="none" stroke={color} strokeWidth="5"
+          strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+          style={{transition:"stroke-dashoffset .9s linear"}}/>
+      </svg>
+      <div style={{position:"relative",zIndex:1,textAlign:"center"}}>
+        <div className="D" style={{fontSize:36,fontWeight:900,lineHeight:1,color}}>{left}</div>
+        <div style={{fontSize:10,color:"var(--muted)"}}>seg</div>
+      </div>
+    </div>
+  );
+}
+
+function ExecutionScreen({players,onFinish}){
+  const isCoop=players.length>1;
   const totalSets=players.reduce((a,p)=>a+p.plan.reduce((b,e)=>b+e.sets,0),0);
+
+  // Per-player state: {exIdx, setNum, done}
+  const [pState,setPState]=useState(()=>players.map(()=>({exIdx:0,setNum:1,done:false})));
+  const [doneSets,setDoneSets]=useState(0);
+  const [resting,setResting]=useState({}); // {pIdx: true} when player is resting
+
+  const allDone=pState.every(p=>p.done);
   const overallPct=totalSets>0?Math.round((doneSets/totalSets)*100):0;
 
-  const advanceNext=()=>{
+  const completeSet=(pIdx)=>{
+    const ps=pState[pIdx];
+    const plan=players[pIdx].plan;
+    const ex=plan[ps.exIdx];
     setDoneSets(d=>d+1);
-    if(setNum<ex.sets){setSetNum(s=>s+1);setPhase("rest");}
-    else if(exIdx+1<plan.length){setExIdx(i=>i+1);setSetNum(1);setPhase("rest");}
-    else if(isCoop&&pIdx+1<players.length){
-      // Switch to next player
-      setPIdx(p=>p+1);setExIdx(0);setSetNum(1);setPhase("show");
-    }else{setPhase("done");}
+
+    if(ps.setNum<ex.sets){
+      // More sets — start rest then next set
+      setResting(r=>({...r,[pIdx]:true}));
+      setTimeout(()=>{
+        setResting(r=>({...r,[pIdx]:false}));
+        setPState(prev=>prev.map((p,i)=>i===pIdx?{...p,setNum:p.setNum+1}:p));
+      },ex.rest*1000);
+    } else if(ps.exIdx+1<plan.length){
+      // Next exercise
+      setResting(r=>({...r,[pIdx]:true}));
+      setTimeout(()=>{
+        setResting(r=>({...r,[pIdx]:false}));
+        setPState(prev=>prev.map((p,i)=>i===pIdx?{...p,exIdx:p.exIdx+1,setNum:1}:p));
+      },ex.rest*1000);
+    } else {
+      // Player done
+      setPState(prev=>prev.map((p,i)=>i===pIdx?{...p,done:true}:p));
+    }
   };
 
-  if(phase==="done")return(
+  if(allDone)return(
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
       <div style={{fontSize:72,marginBottom:16}}>🏆</div>
       <div className="D" style={{fontSize:52,fontWeight:900,color:"var(--green)",marginBottom:8}}>¡COMPLETADO!</div>
       <div style={{fontSize:15,color:"var(--sub)",marginBottom:8}}>{totalSets} series · {players.reduce((a,p)=>a+p.plan.length,0)} ejercicios</div>
-      {isCoop&&<div style={{fontSize:13,color:"var(--muted)",marginBottom:24}}>{players.map(p=>p.name).join(" + ")}</div>}
+      {isCoop&&<div style={{display:"flex",gap:12,justifyContent:"center",marginBottom:24}}>
+        {players.map((p,i)=><span key={i} style={{color:p.color,fontWeight:700}}>{p.name}</span>)}
+      </div>}
       <button onClick={()=>onFinish(true)} style={{padding:"14px 36px",borderRadius:10,border:"none",background:"var(--green)",color:"#000",fontSize:16,fontWeight:700}}>
         Ver historial →
       </button>
     </div>
   );
 
-  if(phase==="rest")return(
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,gap:12}}>
-      <Timer seconds={ex.rest} total={ex.rest} onDone={()=>setPhase("show")} label="Descanso" color="var(--amber)"/>
-    </div>
-  );
-
   return(
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",padding:24}}>
-      {/* Progress */}
-      <div style={{marginBottom:20}}>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",padding:20}}>
+      {/* Progress bar */}
+      <div style={{marginBottom:16}}>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--muted)",marginBottom:6}}>
-          <span>{isCoop?`${player.name} — `:""}Ejercicio {exIdx+1}/{plan.length}</span>
-          <span>{overallPct}%</span>
+          <span>{isCoop?"Entrenamiento cooperativo":"Entrenamiento"}</span>
+          <span>{overallPct}% completado</span>
         </div>
         <div style={{height:3,background:"var(--border)",borderRadius:2}}>
-          <div style={{height:"100%",width:`${overallPct}%`,background:player.color||"var(--green)",borderRadius:2,transition:"width .4s"}}/>
+          <div style={{height:"100%",width:`${overallPct}%`,background:"var(--green)",borderRadius:2,transition:"width .4s"}}/>
         </div>
-        {isCoop&&<div style={{display:"flex",gap:6,marginTop:8}}>
-          {players.map((p,i)=>(
-            <div key={i} style={{fontSize:11,padding:"2px 8px",borderRadius:4,
-              background:i===pIdx?`${p.color}20`:"none",
-              border:`1px solid ${i===pIdx?p.color:"var(--border)"}`,
-              color:i===pIdx?p.color:"var(--muted)"}}>
-              {p.name}
-            </div>
-          ))}
-        </div>}
       </div>
 
-      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:18,textAlign:"center"}}>
-        <div style={{fontSize:60}}>{ex.icon}</div>
-        <div>
-          <div className="D" style={{fontSize:40,fontWeight:900,lineHeight:1}}>{ex.name}</div>
-          <div style={{fontSize:13,color:"var(--sub)",marginTop:4}}>{ex.muscle}</div>
-          <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:6,flexWrap:"wrap"}}>
-            {ex.errLabels?.map((l,i)=>(
-              <span key={i} style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:"rgba(255,71,87,.1)",color:"var(--red)",border:"1px solid rgba(255,71,87,.25)"}}>{l}</span>
-            ))}
-          </div>
-        </div>
+      {/* Player columns */}
+      <div style={{display:"grid",gridTemplateColumns:isCoop?"1fr 1fr":"1fr",gap:12,flex:1}}>
+        {players.map((player,pIdx)=>{
+          const ps=pState[pIdx];
+          const plan=player.plan;
+          const ex=plan[ps.exIdx];
+          const isResting=resting[pIdx];
+          const isDone=ps.done;
 
-        {/* Reps + set info */}
-        <div style={{display:"flex",gap:20,alignItems:"center"}}>
-          <div style={{textAlign:"center"}}>
-            <div className="D" style={{fontSize:58,fontWeight:900,color:player.color||"var(--orange)",lineHeight:1}}>{ex.baseReps}</div>
-            <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase"}}>{ex.unit}</div>
-          </div>
-          <div style={{width:1,height:48,background:"var(--border)"}}/>
-          <div style={{textAlign:"center"}}>
-            <div className="D" style={{fontSize:26,fontWeight:700,color:"var(--sub)"}}>Serie {setNum}/{ex.sets}</div>
-            <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{ex.rest}s descanso</div>
-          </div>
-        </div>
+          if(isDone)return(
+            <div key={pIdx} style={{background:"var(--card)",borderRadius:12,padding:20,
+              border:`2px solid ${player.color}`,display:"flex",flexDirection:"column",
+              alignItems:"center",justifyContent:"center",gap:12,textAlign:"center"}}>
+              <div style={{fontSize:48}}>✅</div>
+              <div className="D" style={{fontSize:24,fontWeight:900,color:player.color}}>¡{player.name} listo!</div>
+              <div style={{fontSize:13,color:"var(--sub)"}}>Esperando al otro jugador...</div>
+            </div>
+          );
 
-        <SetDots done={setNum-1} total={ex.sets} color={player.color||"var(--orange)"}/>
+          if(isResting){
+            const nextLabel=ps.setNum<ex.sets?`Serie ${ps.setNum+1}/${ex.sets}`:(plan[ps.exIdx+1]?.name||"¡Listo!");
+            return(
+              <div key={pIdx} style={{background:"var(--card)",borderRadius:12,padding:20,
+                border:`2px solid ${player.color}`,display:"flex",flexDirection:"column",
+                alignItems:"center",justifyContent:"center",gap:10,textAlign:"center"}}>
+                <div className="D" style={{fontSize:15,fontWeight:700,color:player.color}}>{player.name} — Descanso</div>
+                <RestTimer key={`${pIdx}-${ps.exIdx}-${ps.setNum}`} seconds={ex.rest} color={player.color}/>
+                <div style={{fontSize:11,color:"var(--muted)"}}>Próximo: <strong style={{color:player.color}}>{nextLabel}</strong></div>
+                <button onClick={()=>{
+                  setResting(r=>({...r,[pIdx]:false}));
+                  if(ps.setNum<ex.sets){
+                    setPState(prev=>prev.map((p,i)=>i===pIdx?{...p,setNum:p.setNum+1}:p));
+                  } else {
+                    setPState(prev=>prev.map((p,i)=>i===pIdx?{...p,exIdx:p.exIdx+1,setNum:1}:p));
+                  }
+                }} style={{padding:"6px 18px",borderRadius:8,border:`1px solid ${player.color}`,background:"none",color:player.color,fontSize:11,cursor:"pointer",fontWeight:600}}>
+                  Saltar →
+                </button>
+              </div>
+            );
+          }
 
-        <div style={{background:"var(--card)",borderRadius:10,padding:"10px 18px",fontSize:13,color:"var(--sub)",maxWidth:300,lineHeight:1.6,border:"1px solid var(--border)"}}>{ex.desc}</div>
-
-        {ex.unit==="seg"
-          ?<Timer seconds={ex.baseReps} total={ex.baseReps} onDone={advanceNext} label="Aguanta" color={player.color||"var(--orange)"}/>
-          :<button onClick={advanceNext}
-            style={{padding:"16px 48px",borderRadius:12,border:"none",
-              background:player.color||"var(--orange)",color:"#fff",
-              fontSize:18,fontWeight:700,fontFamily:"'Barlow Condensed',sans-serif",letterSpacing:1}}>
-            ✓ SERIE COMPLETA
-          </button>}
+          return(
+            <ExCard key={pIdx} ex={ex} setNum={ps.setNum} player={player}
+              onComplete={()=>completeSet(pIdx)}
+              onTimerDone={()=>completeSet(pIdx)}
+              compact={isCoop}/>
+          );
+        })}
       </div>
     </div>
   );
@@ -336,7 +393,7 @@ function SessionPicker({sessions,onSelect,onClose}){
           <button onClick={onClose} style={{background:"none",border:"none",color:"var(--muted)",fontSize:20,cursor:"pointer"}}>✕</button>
         </div>
         {sessions.length===0
-          ?<div style={{padding:32,textAlign:"center",color:"var(--muted)",fontSize:13}}>No hay sesiones en RL Tracker. Añade errores manualmente.</div>
+          ?<div style={{padding:32,textAlign:"center",color:"var(--muted)",fontSize:13}}>No hay sesiones en RL Tracker.</div>
           :sessions.slice(0,10).map((s,i)=>{
             const te=s.matches?.reduce((a,m)=>a+Object.values(m.errors||{}).reduce((x,y)=>x+y,0),0)||0;
             const th=s.matches?.reduce((a,m)=>a+Object.values(m.hits||{}).reduce((x,y)=>x+y,0),0)||0;
@@ -347,9 +404,9 @@ function SessionPicker({sessions,onSelect,onClose}){
                 onMouseLeave={e=>e.currentTarget.style.background="none"}>
                 <div style={{flex:1}}>
                   <div style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{s.modeName}</div>
-                  <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.date}{s.time&&s.time!=="Posicionamiento"?` · ${s.time}`:""} · {s.matches?.length||0}p</div>
+                  <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.date} · {s.matches?.length||0} partidas</div>
                 </div>
-                <div style={{display:"flex",gap:10,flexShrink:0}}>
+                <div style={{display:"flex",gap:10}}>
                   <span style={{fontSize:12,color:"var(--red)",fontWeight:600}}>{te} err</span>
                   {th>0&&<span style={{fontSize:12,color:"var(--green)",fontWeight:600}}>{th} ✓</span>}
                 </div>
@@ -363,26 +420,33 @@ function SessionPicker({sessions,onSelect,onClose}){
 }
 
 // ── PLAYER CONFIG ─────────────────────────────────────────────────────────────
-function PlayerConfig({player, onChange, label, color}){
-  const [importMode,setImportMode]=useState("manual");
+function PlayerConfig({player,onChange,label,color}){
   const [sessions]=useState(getAllSessions);
   const [showPicker,setShowPicker]=useState(false);
   const [sessionInfo,setSessionInfo]=useState(null);
+  const [importMode,setImportMode]=useState("manual");
+
+  const tier=RANKS.find(r=>r.id===player.rankId)?.tier||1;
+  const visibleErrors=getErrorsForTier(tier);
 
   const selectSession=(s)=>{
-    const{errors,hits}=extractFromSession(s);
-    setSessionInfo(s);onChange({...player,errors,hits});setShowPicker(false);
-    setImportMode("auto");
+    const{errors,hits}=extractFromSession(s,tier);
+    setSessionInfo(s);onChange({...player,errors,hits});setShowPicker(false);setImportMode("auto");
   };
 
   const setErr=(k,v)=>onChange({...player,errors:{...player.errors,[k]:Math.max(0,v)}});
-  const totalErrors=Object.values(player.errors).reduce((a,b)=>a+b,0);
+  const setRank=(r)=>{
+    const newTier=r.tier;
+    const newErrors=Object.fromEntries(getErrorsForTier(newTier).map(e=>[e.id,0]));
+    onChange({...player,rankId:r.id,tier:newTier,errors:newErrors,hits:0});
+    setSessionInfo(null);setImportMode("manual");
+  };
 
   return(
     <div style={{marginBottom:20}}>
       {showPicker&&<SessionPicker sessions={sessions} onSelect={selectSession} onClose={()=>setShowPicker(false)}/>}
 
-      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <div style={{width:10,height:10,borderRadius:"50%",background:color,flexShrink:0}}/>
         <div className="D" style={{fontSize:20,fontWeight:800,color}}>{label}</div>
       </div>
@@ -392,9 +456,11 @@ function PlayerConfig({player, onChange, label, color}){
         <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Género</div>
         <div style={{display:"flex",gap:8}}>
           {[["m","♂ Masculino"],["f","♀ Femenino"]].map(([g,lbl])=>(
-            <Btn key={g} active={player.gender===g} color={color} onClick={()=>onChange({...player,gender:g})} style={{flex:1,textAlign:"center"}}>
+            <button key={g} onClick={()=>onChange({...player,gender:g})}
+              style={{flex:1,padding:"10px",borderRadius:10,border:`2px solid ${player.gender===g?color:"var(--border)"}`,
+                background:player.gender===g?`${color}18`:"var(--card)",color:player.gender===g?color:"var(--sub)",fontSize:13,fontWeight:player.gender===g?700:400}}>
               {lbl}
-            </Btn>
+            </button>
           ))}
         </div>
       </div>
@@ -404,7 +470,7 @@ function PlayerConfig({player, onChange, label, color}){
         <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Rango actual</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
           {RANKS.map(r=>(
-            <button key={r.id} onClick={()=>onChange({...player,rankId:r.id,tier:r.tier})}
+            <button key={r.id} onClick={()=>setRank(r)}
               style={{padding:"8px 4px",borderRadius:8,border:`2px solid ${player.rankId===r.id?r.color:"var(--border)"}`,
                 background:player.rankId===r.id?`${r.color}18`:"var(--card)",
                 color:player.rankId===r.id?r.color:"var(--muted)",fontSize:11,fontWeight:player.rankId===r.id?700:400}}>
@@ -412,9 +478,12 @@ function PlayerConfig({player, onChange, label, color}){
             </button>
           ))}
         </div>
+        {visibleErrors.length>0&&<div style={{fontSize:11,color:"var(--muted)",marginTop:6}}>
+          {visibleErrors.length} errores relevantes para {RANKS.find(r=>r.id===player.rankId)?.label}
+        </div>}
       </div>
 
-      {/* Source of errors */}
+      {/* Error source */}
       <div style={{marginBottom:10}}>
         <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Errores de la sesión</div>
         <div style={{display:"flex",gap:8,marginBottom:10}}>
@@ -423,38 +492,47 @@ function PlayerConfig({player, onChange, label, color}){
               background:importMode==="auto"?`${color}10`:"var(--card)",color:importMode==="auto"?color:"var(--sub)",fontSize:12,cursor:"pointer"}}>
             ⚡ {sessionInfo?"Sesión cargada":"Importar sesión"}
           </button>}
-          <button onClick={()=>{setImportMode("manual");setSessionInfo(null);}}
+          <button onClick={()=>{setImportMode("manual");setSessionInfo(null);
+            onChange({...player,errors:Object.fromEntries(visibleErrors.map(e=>[e.id,0])),hits:0});}}
             style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${importMode==="manual"?color:"var(--border)"}`,
               background:importMode==="manual"?`${color}10`:"var(--card)",color:importMode==="manual"?color:"var(--sub)",fontSize:12,cursor:"pointer"}}>
             ✏️ Manual
           </button>
         </div>
-        {sessionInfo&&importMode==="auto"&&(
-          <div style={{fontSize:11,color:"var(--muted)",padding:"6px 10px",background:"var(--surface)",borderRadius:6,marginBottom:8,display:"flex",justifyContent:"space-between"}}>
-            <span>{sessionInfo.modeName} · {sessionInfo.date}</span>
-            <span style={{color:"var(--red)"}}>{totalErrors} err</span>
-          </div>
-        )}
+        {sessionInfo&&<div style={{fontSize:11,color:"var(--muted)",padding:"6px 10px",background:"var(--surface)",borderRadius:6,marginBottom:8,display:"flex",justifyContent:"space-between"}}>
+          <span>{sessionInfo.modeName} · {sessionInfo.date}</span>
+          <button onClick={()=>setShowPicker(true)} style={{background:"none",border:"none",color:color,fontSize:11,cursor:"pointer"}}>Cambiar</button>
+        </div>}
       </div>
 
-      {/* Error counters */}
+      {/* Error counters — only show errors relevant to rank */}
       <div style={{display:"grid",gap:6}}>
-        {Object.entries(ERR_LABELS).map(([k,lbl])=>(
-          <div key={k} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"var(--card)",borderRadius:8,
-            border:`1px solid ${player.errors[k]>0?"rgba(255,71,87,.3)":"var(--border)"}`}}>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:600,color:player.errors[k]>0?"var(--text)":"var(--sub)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lbl}</div>
+        {visibleErrors.map(e=>(
+          <div key={e.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"var(--card)",borderRadius:8,
+            border:`1px solid ${(player.errors[e.id]||0)>0?"rgba(255,71,87,.3)":"var(--border)"}`}}>
+            <div style={{flex:1,fontSize:12,fontWeight:600,color:(player.errors[e.id]||0)>0?"var(--text)":"var(--sub)"}}>{e.label}</div>
+            <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+              <button onClick={()=>setErr(e.id,(player.errors[e.id]||0)-1)}
+                style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--sub)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+              <span className="D" style={{fontSize:20,fontWeight:700,color:(player.errors[e.id]||0)>0?"var(--red)":"var(--muted)",minWidth:20,textAlign:"center"}}>{player.errors[e.id]||0}</span>
+              <button onClick={()=>setErr(e.id,(player.errors[e.id]||0)+1)}
+                style={{width:28,height:28,borderRadius:6,border:"1px solid rgba(255,71,87,.4)",background:"rgba(255,71,87,.1)",color:"var(--red)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
             </div>
-            <Counter value={player.errors[k]||0} onChange={v=>setErr(k,v)} color="var(--red)"/>
           </div>
         ))}
         {/* Hits */}
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"rgba(57,217,138,.05)",borderRadius:8,border:"1px solid rgba(57,217,138,.2)"}}>
           <div style={{flex:1}}>
             <div style={{fontSize:12,fontWeight:600,color:"var(--green)"}}>✓ Aciertos totales</div>
-            <div style={{fontSize:10,color:"var(--muted)"}}>Cada 3 = −1 serie</div>
+            <div style={{fontSize:10,color:"var(--muted)"}}>Cada 3 = −1 serie (mín. 2)</div>
           </div>
-          <Counter value={player.hits||0} onChange={v=>onChange({...player,hits:v})} color="var(--green)"/>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <button onClick={()=>onChange({...player,hits:Math.max(0,(player.hits||0)-1)})}
+              style={{width:28,height:28,borderRadius:6,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--sub)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+            <span className="D" style={{fontSize:20,fontWeight:700,color:"var(--green)",minWidth:20,textAlign:"center"}}>{player.hits||0}</span>
+            <button onClick={()=>onChange({...player,hits:(player.hits||0)+1})}
+              style={{width:28,height:28,borderRadius:6,border:"1px solid rgba(57,217,138,.4)",background:"rgba(57,217,138,.1)",color:"var(--green)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+          </div>
         </div>
       </div>
     </div>
@@ -463,69 +541,60 @@ function PlayerConfig({player, onChange, label, color}){
 
 // ── SETUP SCREEN ──────────────────────────────────────────────────────────────
 function SetupScreen({onStart}){
-  const [step,setStep]=useState("mode"); // mode | area | config | preview
-  const [mode,setMode]=useState(null); // individual | coop
+  const [step,setStep]=useState("mode");
+  const [mode,setMode]=useState(null);
   const [area,setArea]=useState(null);
-  const defaultPlayer=()=>({gender:"m",rankId:"gold",tier:3,errors:Object.fromEntries(Object.keys(ERR_LABELS).map(k=>[k,0])),hits:0});
-  const [p1,setP1]=useState(defaultPlayer);
-  const [p2,setP2]=useState({...defaultPlayer(),gender:"f"});
-  const [sessions]=useState(getAllSessions);
+  const defaultPlayer=(gender="m")=>({gender,rankId:"gold",tier:3,errors:Object.fromEntries(getErrorsForTier(3).map(e=>[e.id,0])),hits:0});
+  const [p1,setP1]=useState(()=>defaultPlayer("m"));
+  const [p2,setP2]=useState(()=>defaultPlayer("f"));
+  const COLORS=["var(--orange)","var(--pink)"];
 
-  // Auto-load last session for individual
   useEffect(()=>{
+    const sessions=getAllSessions();
     if(sessions.length>0){
-      const{errors,hits}=extractFromSession(sessions[0]);
+      const tier=RANKS.find(r=>r.id===p1.rankId)?.tier||3;
+      const{errors,hits}=extractFromSession(sessions[0],tier);
       setP1(prev=>({...prev,errors,hits}));
     }
   },[]);
 
-  const COLORS=["var(--orange)","var(--pink)"];
-
   const buildPlayers=()=>{
     if(mode==="individual"){
-      return[{name:"Tú",color:COLORS[0],plan:buildPlan(p1.errors,p1.hits,area,p1.gender,p1.tier)}];
-    }else{
-      return[
-        {name:"Jugador 1",color:COLORS[0],plan:buildPlan(p1.errors,p1.hits,area,p1.gender,p1.tier)},
-        {name:"Jugador 2",color:COLORS[1],plan:buildPlan(p2.errors,p2.hits,area,p2.gender,p2.tier)},
-      ];
+      return[{name:"Tú",color:COLORS[0],plan:buildPlan(p1.errors,p1.hits||0,area,p1.gender,p1.tier)}];
     }
+    return[
+      {name:"Jugador 1",color:COLORS[0],plan:buildPlan(p1.errors,p1.hits||0,area,p1.gender,p1.tier)},
+      {name:"Jugador 2",color:COLORS[1],plan:buildPlan(p2.errors,p2.hits||0,area,p2.gender,p2.tier)},
+    ];
   };
 
   const players=step==="preview"?buildPlayers():[];
-  const p1Errors=Object.values(p1.errors).reduce((a,b)=>a+b,0);
-  const p2Errors=Object.values(p2.errors).reduce((a,b)=>a+b,0);
-  const canStart=players.length>0&&players.every(p=>p.plan.length>0);
+  const canStart=players.length>0&&players.some(p=>p.plan.length>0);
+  const STEPS=["mode","area","config","preview"];
 
   return(
     <div style={{maxWidth:520,margin:"0 auto",padding:"20px 16px 80px"}}>
-
-      {/* Header */}
       <div style={{textAlign:"center",marginBottom:24,paddingTop:8}}>
         <div style={{fontSize:42,marginBottom:6}}>🏋️</div>
         <div className="D" style={{fontSize:36,fontWeight:900,letterSpacing:-1}}>RL WORKOUT</div>
         <div style={{fontSize:12,color:"var(--sub)",marginTop:3}}>Entrena tus errores de Rocket League</div>
       </div>
 
-      {/* Step indicator */}
       <div style={{display:"flex",gap:6,marginBottom:24,justifyContent:"center"}}>
-        {["mode","area","config","preview"].map((s,i)=>(
+        {STEPS.map((s,i)=>(
           <div key={s} style={{width:28,height:4,borderRadius:2,
-            background:["mode","area","config","preview"].indexOf(step)>=i?"var(--orange)":"var(--border)",
-            transition:"background .2s"}}/>
+            background:STEPS.indexOf(step)>=i?"var(--orange)":"var(--border)",transition:"background .2s"}}/>
         ))}
       </div>
 
-      {/* STEP 1: Mode */}
       {step==="mode"&&(
         <div className="au">
-          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:14}}>Modo de juego</div>
+          <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:14}}>Modo</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:24}}>
             {[["individual","👤","Individual","Solo tú"],["coop","👥","Cooperativo","Tú y alguien más"]].map(([m,ic,lbl,desc])=>(
               <button key={m} onClick={()=>setMode(m)}
                 style={{padding:"18px 14px",borderRadius:12,border:`2px solid ${mode===m?"var(--orange)":"var(--border)"}`,
-                  background:mode===m?"rgba(255,107,53,.08)":"var(--card)",
-                  color:mode===m?"var(--orange)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
+                  background:mode===m?"rgba(255,107,53,.08)":"var(--card)",color:mode===m?"var(--orange)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
                 <div style={{fontSize:28,marginBottom:6}}>{ic}</div>
                 <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>{lbl}</div>
                 <div style={{fontSize:11,color:"var(--muted)"}}>{desc}</div>
@@ -539,7 +608,6 @@ function SetupScreen({onStart}){
         </div>
       )}
 
-      {/* STEP 2: Area */}
       {step==="area"&&(
         <div className="au">
           <div style={{fontSize:12,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:14}}>Área a trabajar</div>
@@ -547,8 +615,7 @@ function SetupScreen({onStart}){
             {AREAS.map(a=>(
               <button key={a.id} onClick={()=>setArea(a.id)}
                 style={{padding:"16px 12px",borderRadius:12,border:`2px solid ${area===a.id?"var(--blue)":"var(--border)"}`,
-                  background:area===a.id?"rgba(83,82,237,.08)":"var(--card)",
-                  color:area===a.id?"var(--blue)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
+                  background:area===a.id?"rgba(83,82,237,.08)":"var(--card)",color:area===a.id?"var(--blue)":"var(--sub)",textAlign:"left",cursor:"pointer"}}>
                 <div style={{fontSize:26,marginBottom:6}}>{a.icon}</div>
                 <div style={{fontSize:14,fontWeight:700}}>{a.label}</div>
               </button>
@@ -564,7 +631,6 @@ function SetupScreen({onStart}){
         </div>
       )}
 
-      {/* STEP 3: Config */}
       {step==="config"&&(
         <div className="au">
           <PlayerConfig player={p1} onChange={setP1} label={mode==="coop"?"Jugador 1":"Tú"} color={COLORS[0]}/>
@@ -582,23 +648,20 @@ function SetupScreen({onStart}){
         </div>
       )}
 
-      {/* STEP 4: Preview */}
       {step==="preview"&&(
         <div className="au">
           {players.map((p,pi)=>(
             <div key={pi} style={{marginBottom:20}}>
-              {players.length>1&&(
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-                  <div style={{width:8,height:8,borderRadius:"50%",background:p.color}}/>
-                  <div className="D" style={{fontSize:18,fontWeight:800,color:p.color}}>{p.name}</div>
-                  <div style={{fontSize:12,color:"var(--muted)",marginLeft:4}}>
-                    {RANKS.find(r=>r.id===(pi===0?p1.rankId:p2.rankId))?.label} · {AREAS.find(a=>a.id===area)?.label}
-                  </div>
+              {players.length>1&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:p.color}}/>
+                <div className="D" style={{fontSize:18,fontWeight:800,color:p.color}}>{p.name}</div>
+                <div style={{fontSize:12,color:"var(--muted)",marginLeft:4}}>
+                  {RANKS.find(r=>r.id===(pi===0?p1.rankId:p2.rankId))?.label} · {AREAS.find(a=>a.id===area)?.label}
                 </div>
-              )}
+              </div>}
               {p.plan.length===0
                 ?<div style={{padding:"14px",background:"var(--card)",borderRadius:10,fontSize:13,color:"var(--muted)",textAlign:"center",border:"1px solid var(--border)"}}>
-                  Sin errores registrados — ¡buena sesión!
+                  Sin errores — ¡buena sesión!
                 </div>
                 :p.plan.map(ex=>(
                   <div key={ex.exId} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--card)",borderRadius:8,border:"1px solid var(--border)",marginBottom:6}}>
@@ -614,12 +677,11 @@ function SetupScreen({onStart}){
                   </div>
                 ))
               }
-              {p.plan.length>0&&<div style={{fontSize:11,color:"var(--muted)",textAlign:"right",marginTop:4,paddingRight:4}}>
+              {p.plan.length>0&&<div style={{fontSize:11,color:"var(--muted)",textAlign:"right",marginTop:4}}>
                 {p.plan.reduce((a,e)=>a+e.sets,0)} series · ~{Math.round(p.plan.reduce((a,e)=>a+e.sets,0)*1.5)} min
               </div>}
             </div>
           ))}
-
           <div style={{display:"flex",gap:10,marginTop:8}}>
             <button onClick={()=>setStep("config")} style={{flex:1,padding:"12px",borderRadius:10,border:"1px solid var(--border)",background:"none",color:"var(--muted)",fontSize:14}}>← Ajustar</button>
             <button onClick={()=>onStart(players)} disabled={!canStart}
@@ -641,7 +703,7 @@ function HistoryScreen({history,onBack}){
     <div style={{padding:24,textAlign:"center",paddingTop:60}}>
       <div style={{fontSize:48,marginBottom:12}}>📋</div>
       <div className="D" style={{fontSize:28,fontWeight:800,color:"var(--sub)"}}>Sin historial</div>
-      <div style={{fontSize:13,color:"var(--muted)",marginTop:8,marginBottom:24}}>Completa tu primer workout para verlo aquí</div>
+      <div style={{fontSize:13,color:"var(--muted)",marginTop:8,marginBottom:24}}>Completa tu primer workout</div>
       <button onClick={onBack} style={{padding:"10px 24px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--sub)",fontSize:13}}>← Volver</button>
     </div>
   );
@@ -656,16 +718,9 @@ function HistoryScreen({history,onBack}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
             <div>
               <div style={{fontSize:13,fontWeight:700}}>{entry.date}</div>
-              <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{entry.mode==="coop"?"👥 Cooperativo":"👤 Individual"} · {entry.exercises} ejercicios · {entry.sets} series</div>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{entry.mode==="coop"?"👥 Cooperativo":"👤 Individual"} · {entry.sets} series</div>
             </div>
             <div className="D" style={{fontSize:26,fontWeight:900,color:entry.completed?"var(--green)":"var(--muted)"}}>{entry.completed?"✓":"✕"}</div>
-          </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {entry.plan?.map((ex,j)=>(
-              <span key={j} style={{fontSize:11,padding:"3px 8px",borderRadius:4,background:"var(--surface)",color:"var(--sub)",border:"1px solid var(--border)"}}>
-                {ex.icon} {ex.sets}×{ex.baseReps}
-              </span>
-            ))}
           </div>
         </div>
       ))}
@@ -681,14 +736,11 @@ function App(){
 
   const startWorkout=(p)=>{setPlayers(p);setScreen("execution");};
   const finishWorkout=(completed=true)=>{
-    const allPlans=players.flatMap(p=>p.plan);
     const entry={
       date:new Date().toLocaleDateString("es-ES")+" · "+new Date().toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}),
       mode:players.length>1?"coop":"individual",
-      exercises:allPlans.length,
-      sets:allPlans.reduce((a,e)=>a+e.sets,0),
-      completed,
-      plan:allPlans.map(e=>({exId:e.exId,icon:e.icon,sets:e.sets,baseReps:e.baseReps,unit:e.unit}))
+      sets:players.reduce((a,p)=>a+p.plan.reduce((b,e)=>b+e.sets,0),0),
+      completed
     };
     const newH=[...history,entry];
     setHistory(newH);saveHistory(newH);
