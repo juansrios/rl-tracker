@@ -57,9 +57,31 @@ const ALL_ERRORS = [
   {id:"cincuenta",  label:"Perdiste el 50/50",         minTier:1},
 ];
 
-function getErrorsForTier(tier){
-  return ALL_ERRORS.filter(e=>e.minTier<=tier);
+function getErrorsForTier(tier, focusIds=null){
+  const byTier=ALL_ERRORS.filter(e=>e.minTier<=tier);
+  if(!focusIds||focusIds.length===0||focusIds.includes("general")) return byTier;
+  const relevant=new Set(focusIds.flatMap(fid=>{
+    const f=FOCUSES.find(f=>f.id===fid);
+    return f?.errors||[];
+  }));
+  return byTier.filter(e=>relevant.has(e.id));
 }
+
+// ── FOCUS AREAS ───────────────────────────────────────────────────────────────
+const FOCUSES=[
+  {id:"aerial",    icon:"✈️",  label:"Vuelo / Aerials",      desc:"Aerials, flicks y juego aéreo",      errors:["whiff","timing","overcommit"]},
+  {id:"defense",   icon:"🛡️", label:"Defensa",               desc:"Rotaciones defensivas y cobertura",  errors:["open_net","rotacion","overcommit","posicion"]},
+  {id:"shooting",  icon:"🎯",  label:"Puntería",              desc:"Remates, disparos y precisión",      errors:["timing","cincuenta","whiff","open_net"]},
+  {id:"gamesense", icon:"🧠",  label:"Game Sense",            desc:"Lectura del juego y toma de decisiones", errors:["rotacion","overcommit","posicion","boost"]},
+  {id:"rotation",  icon:"🔄",  label:"Rotación",              desc:"Flujo de rotación y posicionamiento", errors:["rotacion","posicion","overcommit","open_net"]},
+  {id:"boost",     icon:"⚡",  label:"Boost & Kickoff",       desc:"Gestión del boost y kickoffs",       errors:["boost","kickoff","posicion"]},
+  {id:"dribbling", icon:"🏀",  label:"Dribbling",             desc:"Control de balón y pases rasantes",  errors:["timing","cincuenta","posicion"]},
+  {id:"50_50",     icon:"⚔️",  label:"Duelos / 50/50",        desc:"Disputas, headers y contacto físico",errors:["cincuenta","overcommit","kickoff","timing"]},
+  {id:"passing",   icon:"🎽",  label:"Pase y Asistencia",     desc:"Centros, pases y juego en equipo",   errors:["posicion","rotacion","boost","open_net"]},
+  {id:"speed",     icon:"💨",  label:"Velocidad y Mecánicas", desc:"Speedflips, dashes y car control",   errors:["kickoff","timing","overcommit","cincuenta"]},
+  {id:"wall",      icon:"🧱",  label:"Juego de Pared",        desc:"Remates en pared y recuperaciones",  errors:["timing","whiff","posicion","boost"]},
+  {id:"general",   icon:"💯",  label:"General",               desc:"Todos los errores de tu rango",      errors:null},
+];
 
 // ── AREAS ─────────────────────────────────────────────────────────────────────
 const AREAS=[
@@ -159,8 +181,8 @@ function getAllSessions(){
     try{const raw=localStorage.getItem(key);if(raw){const d=JSON.parse(raw);if(d&&d.length>0)return d;}}catch{}
   }return[];
 }
-function extractFromSession(session,tier){
-  const errors=Object.fromEntries(getErrorsForTier(tier).map(e=>[e.id,0]));
+function extractFromSession(session,tier,focusIds=null){
+  const errors=Object.fromEntries(getErrorsForTier(tier,focusIds).map(e=>[e.id,0]));
   let hits=0;
   session.matches?.forEach(m=>{
     Object.entries(m.errors||{}).forEach(([k,v])=>{if(k in errors)errors[k]=(errors[k]||0)+v;});
@@ -427,17 +449,32 @@ function PlayerConfig({player,onChange,label,color}){
   const [importMode,setImportMode]=useState("manual");
 
   const tier=RANKS.find(r=>r.id===player.rankId)?.tier||1;
-  const visibleErrors=getErrorsForTier(tier);
+  const focuses=player.focuses||[];
+  const visibleErrors=getErrorsForTier(tier,focuses);
+
+  const toggleFocus=(fid)=>{
+    let newFocuses;
+    if(fid==="general"){
+      newFocuses=["general"];
+    } else {
+      const without=focuses.filter(f=>f!=="general");
+      newFocuses=without.includes(fid)?without.filter(f=>f!==fid):[...without,fid];
+      if(newFocuses.length===0)newFocuses=[];
+    }
+    const newErrors=Object.fromEntries(getErrorsForTier(tier,newFocuses).map(e=>[e.id,0]));
+    onChange({...player,focuses:newFocuses,errors:newErrors,hits:0});
+    setSessionInfo(null);setImportMode("manual");
+  };
 
   const selectSession=(s)=>{
-    const{errors,hits}=extractFromSession(s,tier);
+    const{errors,hits}=extractFromSession(s,tier,focuses);
     setSessionInfo(s);onChange({...player,errors,hits});setShowPicker(false);setImportMode("auto");
   };
 
   const setErr=(k,v)=>onChange({...player,errors:{...player.errors,[k]:Math.max(0,v)}});
   const setRank=(r)=>{
     const newTier=r.tier;
-    const newErrors=Object.fromEntries(getErrorsForTier(newTier).map(e=>[e.id,0]));
+    const newErrors=Object.fromEntries(getErrorsForTier(newTier,focuses).map(e=>[e.id,0]));
     onChange({...player,rankId:r.id,tier:newTier,errors:newErrors,hits:0});
     setSessionInfo(null);setImportMode("manual");
   };
@@ -483,6 +520,36 @@ function PlayerConfig({player,onChange,label,color}){
         </div>}
       </div>
 
+      {/* Focus selector */}
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>
+          ¿Qué quieres mejorar? <span style={{color:"var(--muted)",fontWeight:400,textTransform:"none"}}>(elige uno o varios)</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          {FOCUSES.map(f=>{
+            const active=focuses.includes(f.id)||(f.id==="general"&&focuses.length===0);
+            return(
+              <button key={f.id} onClick={()=>toggleFocus(f.id)}
+                style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,
+                  border:`1.5px solid ${active?color:"var(--border)"}`,
+                  background:active?`${color}15`:"var(--card)",
+                  color:active?color:"var(--sub)",cursor:"pointer",textAlign:"left"}}>
+                <span style={{fontSize:16,flexShrink:0}}>{f.icon}</span>
+                <div>
+                  <div style={{fontSize:12,fontWeight:active?700:500}}>{f.label}</div>
+                  <div style={{fontSize:10,color:"var(--muted)",marginTop:1}}>{f.desc}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {visibleErrors.length>0&&focuses.length>0&&!focuses.includes("general")&&(
+          <div style={{fontSize:11,color:color,marginTop:8,padding:"6px 10px",background:`${color}10`,borderRadius:6}}>
+            {visibleErrors.length} error{visibleErrors.length!==1?"es":""} seleccionado{visibleErrors.length!==1?"s":""}: {visibleErrors.map(e=>e.label).join(", ")}
+          </div>
+        )}
+      </div>
+
       {/* Error source */}
       <div style={{marginBottom:10}}>
         <div style={{fontSize:11,color:"var(--muted)",textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Errores de la sesión</div>
@@ -493,7 +560,7 @@ function PlayerConfig({player,onChange,label,color}){
             ⚡ {sessionInfo?"Sesión cargada":"Importar sesión"}
           </button>}
           <button onClick={()=>{setImportMode("manual");setSessionInfo(null);
-            onChange({...player,errors:Object.fromEntries(visibleErrors.map(e=>[e.id,0])),hits:0});}}
+            onChange({...player,errors:Object.fromEntries(getErrorsForTier(tier,focuses).map(e=>[e.id,0])),hits:0});}}
             style={{flex:1,padding:"9px",borderRadius:8,border:`1px solid ${importMode==="manual"?color:"var(--border)"}`,
               background:importMode==="manual"?`${color}10`:"var(--card)",color:importMode==="manual"?color:"var(--sub)",fontSize:12,cursor:"pointer"}}>
             ✏️ Manual
@@ -544,7 +611,7 @@ function SetupScreen({onStart}){
   const [step,setStep]=useState("mode");
   const [mode,setMode]=useState(null);
   const [area,setArea]=useState(null);
-  const defaultPlayer=(gender="m")=>({gender,rankId:"gold",tier:3,errors:Object.fromEntries(getErrorsForTier(3).map(e=>[e.id,0])),hits:0});
+  const defaultPlayer=(gender="m")=>({gender,rankId:"gold",tier:3,focuses:[],errors:Object.fromEntries(getErrorsForTier(3,[]).map(e=>[e.id,0])),hits:0});
   const [p1,setP1]=useState(()=>defaultPlayer("m"));
   const [p2,setP2]=useState(()=>defaultPlayer("f"));
   const COLORS=["var(--orange)","var(--pink)"];
