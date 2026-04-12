@@ -43,22 +43,28 @@ const RANKS=[
   {id:"gc",      label:"GC+",      tier:7, color:"#FF6B6B"},
 ];
 
-// ── ERRORS BY RANK TIER ────────────────────────────────────────────────────────
-// Each error has minTier — below that tier, the error is hidden (not relevant)
+// ── ERRORS — labels adapt to rank tier ────────────────────────────────────────
+// labels: [bronze/silver, gold/plat, diamond/champ, gc]
 const ALL_ERRORS = [
-  {id:"whiff",      label:"Whiff en Aerial",          minTier:4}, // Plat+
-  {id:"overcommit", label:"Overcommit / Doble Commit", minTier:1},
-  {id:"rotacion",   label:"Mala Rotación",             minTier:2}, // Silver+
-  {id:"open_net",   label:"Open Net Fallado",          minTier:3}, // Gold+
-  {id:"kickoff",    label:"Kickoff Perdido",           minTier:1},
-  {id:"boost",      label:"Boost Mal Gestionado",      minTier:2}, // Silver+
-  {id:"posicion",   label:"Error de Posicionamiento",  minTier:1},
-  {id:"timing",     label:"Mal Timing en Remate",      minTier:3}, // Gold+
-  {id:"cincuenta",  label:"Perdiste el 50/50",         minTier:1},
+  {id:"whiff",      labels:["Whiff al balón","Whiff en disparo","Whiff en Aerial","Whiff Aerial / Reset"],       minTier:1},
+  {id:"overcommit", labels:["Salir sin apoyo","Overcommit básico","Overcommit / Doble Commit","Doble commit GC"], minTier:1},
+  {id:"rotacion",   labels:["No rotar al arco","Rotación lenta","Mala Rotación","Rotación fuera de tiempo"],      minTier:1},
+  {id:"open_net",   labels:["Arco solo básico","Open Net Fallado","Open Net Fallado","Open Net en clutch"],       minTier:1},
+  {id:"kickoff",    labels:["Kickoff perdido","Kickoff perdido","Kickoff Perdido","Kickoff con mala lectura"],     minTier:1},
+  {id:"boost",      labels:["Sin boost para volver","Boost mal tomado","Boost Mal Gestionado","Starve de boost"], minTier:1},
+  {id:"posicion",   labels:["Mala posición en campo","Posición incorrecta","Error de Posicionamiento","Shadow mal ejecutado"], minTier:1},
+  {id:"timing",     labels:["Mal timing de salto","Mal timing de remate","Mal Timing en Remate","Timing en mecánica avanzada"], minTier:1},
+  {id:"cincuenta",  labels:["Perdiste el balón","Perdiste el 50/50","Perdiste el 50/50","50/50 mal leído"],        minTier:1},
 ];
 
+function getLabelForTier(error, tier){
+  // tier 1-2 → index 0, tier 3-4 → index 1, tier 5-6 → index 2, tier 7 → index 3
+  const idx=tier<=2?0:tier<=4?1:tier<=6?2:3;
+  return error.labels[Math.min(idx,error.labels.length-1)];
+}
+
 function getErrorsForTier(tier, focusIds=null){
-  const byTier=ALL_ERRORS.filter(e=>e.minTier<=tier);
+  const byTier=ALL_ERRORS.filter(e=>e.minTier<=tier).map(e=>({...e,label:getLabelForTier(e,tier)}));
   if(!focusIds||focusIds.length===0||focusIds.includes("general")) return byTier;
   const relevant=new Set(focusIds.flatMap(fid=>{
     const f=FOCUSES.find(f=>f.id===fid);
@@ -94,61 +100,57 @@ const AREAS=[
 // ── EXERCISE POOL ─────────────────────────────────────────────────────────────
 const POOL=[
   // UPPER
-  {id:"pushup",   areas:["upper","full"], gender:"m",min:1,max:7,name:"Push-ups",           icon:"💪",muscle:"Pecho + Tríceps",    unit:"reps",baseReps:12,rest:45,desc:"Manos a anchura de hombros, pecho al suelo, sube fuerte"},
-  {id:"pushup_k", areas:["upper","full"], gender:"f",min:1,max:7,name:"Push-ups rodilla",   icon:"💪",muscle:"Pecho + Tríceps",    unit:"reps",baseReps:15,rest:45,desc:"Rodillas en el suelo, misma posición de brazo"},
-  {id:"pushup_w", areas:["upper","full"], gender:"b",min:1,max:2,name:"Push-ups en pared",  icon:"💪",muscle:"Pecho básico",       unit:"reps",baseReps:15,rest:35,desc:"De pie frente a la pared, flexiona los brazos"},
-  {id:"tricep",   areas:["upper","full"], gender:"b",min:1,max:7,name:"Dips en silla",      icon:"🪑",muscle:"Tríceps",            unit:"reps",baseReps:12,rest:40,desc:"Manos en silla, baja doblando codos, sube"},
-  {id:"plank",    areas:["upper","core"], gender:"b",min:3,max:7,name:"Plancha",             icon:"🧱",muscle:"Core + Estabilidad", unit:"seg", baseReps:30,rest:40,desc:"Codos al suelo, cuerpo recto, aguanta"},
-  {id:"plank_k",  areas:["upper","core"], gender:"b",min:1,max:2,name:"Plancha rodillas",   icon:"🧱",muscle:"Core básico",        unit:"seg", baseReps:20,rest:35,desc:"Como plancha pero con rodillas apoyadas"},
-  {id:"shoulder", areas:["upper"],        gender:"b",min:5,max:7,name:"Pike Push-ups",       icon:"🔺",muscle:"Hombros",            unit:"reps",baseReps:10,rest:50,desc:"Cadera arriba en V invertida, baja la cabeza al suelo"},
+  {id:"pushup",  areas:["upper","full"], gender:"m", name:"Push-ups",          icon:"💪", muscle:"Pecho + Tríceps",     unit:"reps",baseReps:12,rest:45, desc:"Manos a anchura de hombros, pecho al suelo, sube fuerte"},
+  {id:"pushup_k",areas:["upper","full"], gender:"f", name:"Push-ups rodilla",  icon:"💪", muscle:"Pecho + Tríceps",     unit:"reps",baseReps:15,rest:45, desc:"Rodillas en el suelo, misma posición de brazo"},
+  {id:"tricep",  areas:["upper","full"], gender:"b", name:"Dips en silla",     icon:"🪑", muscle:"Tríceps",             unit:"reps",baseReps:12,rest:40, desc:"Manos en silla, baja doblando codos, sube"},
+  {id:"plank",   areas:["upper","core"], gender:"b", name:"Plancha",           icon:"🧱", muscle:"Core + Estabilidad",  unit:"seg", baseReps:30,rest:40, desc:"Codos al suelo, cuerpo recto, aguanta"},
+  {id:"shoulder",areas:["upper"],        gender:"b", name:"Pike Push-ups",     icon:"🔺", muscle:"Hombros",             unit:"reps",baseReps:10,rest:50, desc:"Cadera arriba en V invertida, baja la cabeza al suelo"},
   // CORE
-  {id:"crunch",   areas:["core"],         gender:"b",min:1,max:7,name:"Crunches",            icon:"🔄",muscle:"Abdomen",            unit:"reps",baseReps:20,rest:35,desc:"Espalda en el suelo, eleva hombros hacia rodillas"},
-  {id:"twist",    areas:["core","full"],  gender:"b",min:3,max:7,name:"Russian Twists",      icon:"🌀",muscle:"Core + Rotación",    unit:"reps",baseReps:20,rest:40,desc:"Sentado, pies levantados, gira tocando suelo a cada lado"},
-  {id:"twist_e",  areas:["core","full"],  gender:"b",min:1,max:2,name:"Twist sentado",       icon:"🌀",muscle:"Core básico",        unit:"reps",baseReps:20,rest:35,desc:"Sentado con pies en el suelo, gira el torso a cada lado"},
-  {id:"mclimb",   areas:["core","full"],  gender:"b",min:4,max:7,name:"Mountain Climbers",   icon:"🧗",muscle:"Core + Cardio",      unit:"reps",baseReps:20,rest:40,desc:"Desde plancha, lleva rodillas al pecho alternando rápido"},
-  {id:"legrise",  areas:["core"],         gender:"b",min:1,max:7,name:"Elevaciones pierna",  icon:"🦵",muscle:"Abdomen Bajo",       unit:"reps",baseReps:15,rest:40,desc:"Espalda plana, sube las piernas rectas a 90°"},
-  {id:"superman", areas:["core"],         gender:"b",min:1,max:7,name:"Superman",            icon:"🦸",muscle:"Espalda Baja",       unit:"seg", baseReps:25,rest:35,desc:"Boca abajo, eleva brazos y piernas simultáneamente"},
+  {id:"crunch",  areas:["core"],         gender:"b", name:"Crunches",          icon:"🔄", muscle:"Abdomen",             unit:"reps",baseReps:20,rest:35, desc:"Espalda en el suelo, eleva hombros hacia rodillas"},
+  {id:"twist",   areas:["core","full"],  gender:"b", name:"Russian Twists",    icon:"🌀", muscle:"Core + Rotación",     unit:"reps",baseReps:20,rest:40, desc:"Sentado, pies levantados, gira tocando suelo a cada lado"},
+  {id:"mclimb",  areas:["core","full"],  gender:"b", name:"Mountain Climbers", icon:"🧗", muscle:"Core + Cardio",       unit:"reps",baseReps:20,rest:40, desc:"Desde plancha, lleva rodillas al pecho alternando rápido"},
+  {id:"legrise", areas:["core"],         gender:"b", name:"Elevaciones pierna",icon:"🦵", muscle:"Abdomen Bajo",        unit:"reps",baseReps:15,rest:40, desc:"Espalda plana, sube las piernas rectas a 90°"},
+  {id:"superman",areas:["core"],         gender:"b", name:"Superman",          icon:"🦸", muscle:"Espalda Baja",        unit:"seg", baseReps:25,rest:35, desc:"Boca abajo, eleva brazos y piernas simultáneamente"},
   // LOWER
-  {id:"squat",    areas:["lower","full"], gender:"b",min:1,max:7,name:"Sentadillas",         icon:"🏋️",muscle:"Piernas + Glúteos", unit:"reps",baseReps:15,rest:45,desc:"Pies separados, baja hasta paralelo"},
-  {id:"sqjump",   areas:["lower","full"], gender:"b",min:5,max:7,name:"Squat Jumps",         icon:"⚡",muscle:"Piernas + Explosión",unit:"reps",baseReps:12,rest:60,desc:"Sentadilla profunda, salta al subir, aterriza suave"},
-  {id:"sqfast",   areas:["lower","full"], gender:"b",min:3,max:4,name:"Sentadillas rápidas", icon:"⚡",muscle:"Piernas + Ritmo",    unit:"reps",baseReps:15,rest:45,desc:"Sentadillas a ritmo constante, sube rápido sin saltar"},
-  {id:"lunge",    areas:["lower"],        gender:"b",min:2,max:7,name:"Zancadas",            icon:"🦵",muscle:"Piernas + Equilibrio",unit:"reps",baseReps:16,rest:45,desc:"Paso amplio adelante, rodilla trasera casi toca el suelo"},
-  {id:"calf",     areas:["lower"],        gender:"b",min:1,max:7,name:"Elevaciones talón",   icon:"👟",muscle:"Gemelos",            unit:"reps",baseReps:25,rest:30,desc:"Párate en puntillas lentamente, baja controlado"},
-  {id:"glute",    areas:["lower","core"], gender:"b",min:1,max:7,name:"Puente de glúteos",   icon:"🌉",muscle:"Glúteos + Core",     unit:"reps",baseReps:20,rest:35,desc:"Espalda en suelo, pies apoyados, eleva cadera"},
+  {id:"squat",   areas:["lower","full"], gender:"b", name:"Sentadillas",       icon:"🏋️",muscle:"Piernas + Glúteos",  unit:"reps",baseReps:15,rest:45, desc:"Pies separados, baja hasta paralelo"},
+  {id:"sqjump",  areas:["lower","full"], gender:"b", name:"Squat Jumps",       icon:"⚡", muscle:"Piernas + Explosión", unit:"reps",baseReps:12,rest:60, desc:"Sentadilla profunda, salta al subir, aterriza suave"},
+  {id:"lunge",   areas:["lower"],        gender:"b", name:"Zancadas",          icon:"🦵", muscle:"Piernas + Equilibrio",unit:"reps",baseReps:16,rest:45, desc:"Paso amplio adelante, rodilla trasera casi toca el suelo"},
+  {id:"calf",    areas:["lower"],        gender:"b", name:"Elevaciones talón", icon:"👟", muscle:"Gemelos",             unit:"reps",baseReps:25,rest:30, desc:"Párate en puntillas lentamente, baja controlado"},
+  {id:"glute",   areas:["lower","core"], gender:"b", name:"Puente de glúteos", icon:"🌉", muscle:"Glúteos + Core",      unit:"reps",baseReps:20,rest:35, desc:"Espalda en suelo, pies apoyados, eleva cadera"},
   // FULL
-  {id:"burpee",   areas:["full"],         gender:"b",min:6,max:7,name:"Burpees",             icon:"💥",muscle:"Full Body",          unit:"reps",baseReps:8, rest:75,desc:"Plancha–push-up–salto. El rey del castigo"},
-  {id:"burpee_e", areas:["full"],         gender:"b",min:4,max:5,name:"Burpees sin salto",   icon:"💥",muscle:"Full Body mod.",     unit:"reps",baseReps:10,rest:60,desc:"Igual que burpee normal pero sin el salto final"},
-  {id:"burpee_b", areas:["full"],         gender:"b",min:1,max:3,name:"Sentadilla + plancha",icon:"💥",muscle:"Full Body básico",   unit:"reps",baseReps:10,rest:50,desc:"Sentadilla, luego baja a plancha, levántate. Sin salto ni push-up"},
-  {id:"jjack",    areas:["full"],         gender:"b",min:1,max:7,name:"Jumping Jacks",       icon:"🦘",muscle:"Cardio + Full Body", unit:"reps",baseReps:30,rest:30,desc:"Saltos abriendo brazos y piernas. Rítmico y constante"},
-  {id:"bear",     areas:["full"],         gender:"b",min:4,max:7,name:"Bear Crawls",         icon:"🐻",muscle:"Full Body + Core",   unit:"reps",baseReps:10,rest:50,desc:"A cuatro patas con rodillas a 5cm del suelo, avanza"},
+  {id:"burpee",  areas:["full"],         gender:"b", name:"Burpees",           icon:"💥", muscle:"Full Body",           unit:"reps",baseReps:8, rest:75, desc:"Plancha–push-up–salto. El rey del castigo"},
+  {id:"jjack",   areas:["full"],         gender:"b", name:"Jumping Jacks",     icon:"🦘", muscle:"Cardio + Full Body",  unit:"reps",baseReps:30,rest:30, desc:"Saltos abriendo brazos y piernas. Rítmico y constante"},
+  {id:"bear",    areas:["full"],         gender:"b", name:"Bear Crawls",       icon:"🐻", muscle:"Full Body + Core",    unit:"reps",baseReps:10,rest:50, desc:"A cuatro patas con rodillas a 5cm del suelo, avanza"},
 ];
 
 // ── ERROR → EXERCISE MAPPING ──────────────────────────────────────────────────
 const ERROR_MAP={
-  whiff:      {upper:["shoulder","pushup","pushup_k"],core:["mclimb","plank","plank_k"],  lower:["sqjump","sqfast","squat"], full:["mclimb","burpee","burpee_e","burpee_b"]},
-  overcommit: {upper:["pushup","pushup_k","pushup_w","tricep"],core:["twist","twist_e","crunch"],lower:["sqjump","sqfast","squat"],full:["sqjump","sqfast","burpee","burpee_e","burpee_b"]},
-  rotacion:   {upper:["tricep","plank","plank_k"],   core:["twist","twist_e","legrise"],   lower:["glute","lunge","squat"],   full:["twist","twist_e","bear","jjack"]},
-  open_net:   {upper:["pushup","pushup_k","shoulder"],core:["mclimb","superman","crunch"], lower:["sqjump","sqfast","calf"],   full:["burpee","burpee_e","burpee_b","jjack"]},
-  kickoff:    {upper:["plank","plank_k","pushup_w"], core:["crunch","superman","legrise"], lower:["squat","calf","glute"],    full:["jjack","bear","burpee_b"]},
-  boost:      {upper:["plank","plank_k","tricep"],   core:["plank","plank_k","superman"], lower:["glute","squat","calf"],    full:["plank","plank_k","jjack"]},
-  posicion:   {upper:["pushup","pushup_k","pushup_w"],core:["legrise","crunch","superman"],lower:["lunge","glute","squat"],  full:["squat","jjack","burpee_b"]},
-  timing:     {upper:["tricep","shoulder","pushup"],  core:["twist","twist_e","mclimb"],   lower:["sqjump","sqfast","calf"],  full:["mclimb","burpee_e","burpee_b","jjack"]},
-  cincuenta:  {upper:["pushup","pushup_k","pushup_w"],core:["crunch","plank","plank_k"],   lower:["squat","lunge","glute"],  full:["burpee_b","jjack","bear"]},
+  whiff:      {upper:["shoulder","pushup","pushup_k"],core:["mclimb","plank"],  lower:["sqjump","squat"], full:["mclimb","burpee","jjack"]},
+  overcommit: {upper:["pushup","pushup_k","tricep"],  core:["twist","crunch"],  lower:["sqjump","squat"], full:["sqjump","burpee","jjack"]},
+  rotacion:   {upper:["tricep","plank"],              core:["twist","legrise"], lower:["glute","lunge"],  full:["twist","bear","jjack"]},
+  open_net:   {upper:["pushup","pushup_k","shoulder"],core:["mclimb","superman","crunch"],lower:["sqjump","calf"],full:["burpee","jjack"]},
+  kickoff:    {upper:["plank","pushup_k"],            core:["crunch","superman","legrise"],lower:["squat","calf","glute"],full:["jjack","bear"]},
+  boost:      {upper:["plank","tricep"],              core:["plank","superman"], lower:["glute","squat","calf"],full:["plank","jjack"]},
+  posicion:   {upper:["pushup","pushup_k"],           core:["legrise","crunch","superman"],lower:["lunge","glute","squat"],full:["squat","jjack"]},
+  timing:     {upper:["tricep","shoulder","pushup"],  core:["twist","mclimb"],   lower:["sqjump","calf"],  full:["mclimb","burpee","jjack"]},
+  cincuenta:  {upper:["pushup","pushup_k"],           core:["crunch","plank"],   lower:["squat","lunge","glute"],full:["jjack","bear"]},
 };
 
-const ERR_LABELS=Object.fromEntries(ALL_ERRORS.map(e=>[e.id,e.label]));
+function getErrLabels(tier){ return Object.fromEntries(ALL_ERRORS.map(e=>[e.id,getLabelForTier(e,tier)])); }
+const ERR_LABELS=getErrLabels(4); // default for display
 
 function pickExercise(errId,area,gender,tier){
   const candidates=(ERROR_MAP[errId]||{})[area]||[];
   const filtered=candidates
     .map(id=>POOL.find(e=>e.id===id))
-    .filter(e=>e&&(e.gender==="b"||e.gender===gender)&&e.min<=tier&&(!e.max||e.max>=tier));
+    .filter(e=>e&&(e.gender==="b"||e.gender===gender));
   if(filtered.length>0)return filtered[0];
-  const fallback=POOL.filter(e=>e.areas.includes(area)&&(e.gender==="b"||e.gender===gender)&&e.min<=tier&&(!e.max||e.max>=tier));
+  const fallback=POOL.filter(e=>e.areas.includes(area)&&(e.gender==="b"||e.gender===gender));
   return fallback[0]||POOL.find(e=>e.areas.includes(area))||POOL[0];
 }
 
 function buildPlan(errors,hits,area,gender,tier){
+  const errLabels=getErrLabels(tier);
   const HIT_REDUCTION=3;
   const reduction=Math.floor(hits/HIT_REDUCTION);
   const plan=[];
@@ -158,8 +160,8 @@ function buildPlan(errors,hits,area,gender,tier){
     if(!ex)return;
     const existing=plan.find(p=>p.exId===ex.id);
     const sets=Math.min(5,2+(count-1)); // min 2
-    if(existing){existing.sets=Math.min(5,existing.sets+1);existing.errLabels.push(ERR_LABELS[errId]);}
-    else plan.push({exId:ex.id,...ex,sets,errLabels:[ERR_LABELS[errId]]});
+    if(existing){existing.sets=Math.min(5,existing.sets+1);existing.errLabels.push(errLabels[errId]);}
+    else plan.push({exId:ex.id,...ex,sets,errLabels:[errLabels[errId]]});
   });
   // Reduce by hits but never below 2
   let toReduce=Math.min(reduction,plan.reduce((a,e)=>a+Math.max(0,e.sets-2),0));
